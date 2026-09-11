@@ -1,32 +1,35 @@
 # Handicraft API — Docker Compose Configuration
 #
-# This file builds the image from THIS source tree instead of pulling the
-# upstream prebuilt image. That is deliberate and load-bearing: the upstream
-# image (calciumion/new-api) does not contain any Handicraft customisation, so
-# using it would silently discard the fixed version string, the disabled update
-# checker, the welcome banner, the status monitor and the image-input guard.
+# The image is BUILT IN THE CLOUD by .github/workflows/docker-ghcr.yml and
+# pushed to GHCR, so this file only pulls it. Nothing is compiled on the
+# server, which matters because the build needs ~2 GB of RAM and 10-20 minutes
+# (Rsbuild frontend plus the Go backend).
 #
 # Quick Start:
-#   1. docker compose up -d --build
-#   2. Access at http://<server-ip>:3000
+#   1. docker compose pull
+#   2. docker compose up -d
+#   3. Access at http://<server-ip>:3000
 #
-# Rebuild after changing source:
-#   docker compose build --no-cache && docker compose up -d
+# Do NOT swap in calciumion/new-api. That upstream image contains none of the
+# Handicraft customisation, so it would silently discard the fixed version
+# string, the disabled update checker, the welcome banner, the status monitor
+# and the image-input guard.
+#
+# To build from this source tree instead of pulling (for testing local edits):
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 #
 # Using MySQL instead of PostgreSQL: see the comments on the SQL_DSN lines.
-#
-# ⚠️  IMPORTANT: Change all default passwords before deploying to production!
 
 version: '3.4' # For compatibility with older Docker versions
 
 services:
   new-api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    # Names the locally built image so `docker images` stays readable and the
-    # tag can be pushed to a registry later if needed.
-    image: handicraft-api:latest
+    # Published by the GHCR workflow. If the package is private, run
+    # `docker login ghcr.io` first; making it public avoids that entirely.
+    image: ghcr.io/xuehaozhi/handicraft-newapi:latest
+    # Always take the registry copy, so `docker compose up -d` picks up a newer
+    # image instead of silently reusing a stale local one.
+    pull_policy: always
     container_name: new-api
     restart: always
     command: --log-dir /app/logs

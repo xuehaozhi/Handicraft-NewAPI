@@ -9,28 +9,46 @@
 
 ## 一、前置条件
 
+镜像由 GitHub Actions **在云端构建**并推送到 GHCR，服务器**只负责拉取，不需要编译**。
+
 | 项目 | 要求 | 检查命令 |
 | --- | --- | --- |
 | Docker | 20.10+ | `docker --version` |
 | Docker Compose | v2（用 `docker compose`，非 `docker-compose`） | `docker compose version` |
-| 内存 | ≥ 2 GB（前端构建较吃内存） | `free -h` |
-| 磁盘 | ≥ 10 GB 可用 | `df -h /` |
-| 网络 | 能访问 GitHub、Docker Hub、`proxy.golang.org`、`registry.npmjs.org` | — |
+| 内存 | ≥ 1 GB | `free -h` |
+| 磁盘 | ≥ 5 GB 可用 | `df -h /` |
+| 网络 | 能访问 `ghcr.io` 和 Docker Hub | — |
 
-> 服务器需在能直连上述地址的网络中。若服务器在国内，构建阶段拉取基础镜像和 Go 依赖会失败，需要配置镜像源或代理。
+内存和磁盘要求都不高，因为服务器不再承担构建工作。
+
+> 仅当你选择"从源码构建"（见第 4.2 节）时，才需要 ≥ 2 GB 内存和 10–20 分钟编译时间。
 
 ---
 
-## 二、获取源码
+## 二、获取部署文件
+
+默认流程**不需要源码树**，只需要 compose 文件和 `.env.example`。两种方式任选。
+
+### 方式一：克隆仓库（推荐，便于后续更新）
 
 ```bash
 git clone https://github.com/xuehaozhi/Handicraft-NewAPI.git handicraft
 cd handicraft
-git checkout custom/rc33
 ```
 
-仓库只有 `custom/rc33` 一个分支，它同时是默认分支，所以 `git clone` 后通常已在此分支上。用
-`git log --oneline -1` 确认提交为 `478bef8`。
+仓库只有 `custom/rc33` 一个分支，它同时是默认分支，所以 `git clone` 后已在该分支上。
+
+### 方式二：只取三个文件
+
+```bash
+mkdir handicraft && cd handicraft
+BASE=https://raw.githubusercontent.com/xuehaozhi/Handicraft-NewAPI/custom/rc33
+curl -O $BASE/docker-compose.yml
+curl -O $BASE/docker-compose.build.yml
+curl -O $BASE/.env.example
+```
+
+`docker-compose.build.yml` 只有在你需要本地构建时才用得到，可以不下。
 
 ---
 
@@ -72,15 +90,44 @@ REDIS_MAXMEMORY=512mb
 
 ---
 
-## 四、构建与启动
+## 四、启动
+
+### 4.1 默认：拉取云端镜像（无需编译）
 
 ```bash
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
-首次构建需要拉取基础镜像并编译前端和 Go 后端，**预计 10–20 分钟**。
+几十秒内即可启动，服务器不参与任何编译。
 
-构建完成后：
+首次拉取前，先确认镜像包是公开的，否则需要先登录：
+
+```bash
+# 若 ghcr.io/xuehaozhi/handicraft-newapi 是公开包，直接跳过这步
+docker login ghcr.io -u xuehaozhi
+```
+
+**建议把镜像包设为公开**（一次性操作，之后服务器无需任何凭据）：
+
+> GitHub → 你的头像 → Your packages → `handicraft-newapi` → Package settings →
+> Change visibility → Public
+
+镜像由 `.github/workflows/docker-ghcr.yml` 在每次推送到 `custom/rc33` 时自动构建。
+在 GitHub 仓库的 **Actions** 标签页可以看到构建进度；构建完成前，GHCR 上还没有镜像，
+此时 `docker compose pull` 会失败。
+
+### 4.2 可选：从源码本地构建
+
+只有在测试尚未推送的本地改动时才需要：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
+
+需要 ≥ 2 GB 内存，耗时 10–20 分钟。
+
+### 4.3 确认服务状态
 
 ```bash
 docker compose ps
@@ -159,8 +206,15 @@ curl -s http://localhost:3000/api/status | grep -o '"system_name":"[^"]*"'
 "system_name":"Handicraft API"
 ```
 
-**如果显示的是 `v1.0.0-rc.33` 或 `New API`，说明镜像不是从本源码构建的**，
-检查 `docker compose images` 是否为 `handicraft-api:latest`，而非 `calciumion/new-api`。
+**如果显示的是 `v1.0.0-rc.33` 或 `New API`，说明跑的不是本版本的镜像。** 检查：
+
+```bash
+docker compose images    # 应为 ghcr.io/xuehaozhi/handicraft-newapi，而非 calciumion/new-api
+docker inspect new-api --format '{{.Config.Image}}'
+```
+
+若镜像名不对，说明 `docker-compose.yml` 被改过或用的不是本仓库的文件。
+若镜像名正确但版本仍不对，说明 GitHub Actions 那次构建失败或尚未完成，去仓库 Actions 页查看。
 
 ### 7.3 界面
 
@@ -231,12 +285,26 @@ docker compose stop                 # 停止但保留容器
 docker compose down                 # 移除容器（数据卷保留）
 ```
 
-### 更新代码后重新构建
+### 更新到新版本
+
+代码推送后 GitHub Actions 会自动构建新镜像（在仓库 Actions 页可看进度）。构建完成后：
 
 ```bash
-git pull
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
+
+`pull_policy: always` 已配置，所以 `docker compose up -d` 本身也会先拉取最新镜像。
+
+若要回退到某个特定构建，用提交哈希标签：
+
+```bash
+docker pull ghcr.io/xuehaozhi/handicraft-newapi:sha-<commit>
+docker tag ghcr.io/xuehaozhi/handicraft-newapi:sha-<commit> ghcr.io/xuehaozhi/handicraft-newapi:latest
+docker compose up -d
+```
+
+若你是从源码本地构建的，则重新执行 4.2 节的命令即可。
 
 ### 备份
 
@@ -341,6 +409,8 @@ docker compose up -d
 - 新增状态监控页（`/status-monitor`，需登录）
 - **全局禁止图片输入**，所有模型生效
 - 删除硬编码 `root`/`123456` 管理员的死代码
-- `docker-compose.yml` 改为从源码构建（原先拉取官方镜像，会绕过以上全部改动）
+- 镜像不再使用上游的 `calciumion/new-api`（那个镜像不含以上任何改动），
+  改为由 `.github/workflows/docker-ghcr.yml` 从本仓库源码构建并发布到 GHCR，
+  部署端只拉取、不编译
 - Redis 增加持久化与数据卷；依赖改为健康检查门控
 - 密钥集中到 `.env`

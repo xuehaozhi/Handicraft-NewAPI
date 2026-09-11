@@ -1,0 +1,22 @@
+# Override that builds the image from this source tree instead of pulling the
+# published GHCR image.
+#
+# Use it when you want to test a local change without waiting for GitHub
+# Actions to publish a new image:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# The regular docker-compose.yml pulls ghcr.io/xuehaozhi/handicraft-newapi:latest
+# and needs no compiler on the host; this file is the escape hatch, not the
+# default path.
+#
+# Building needs roughly 2 GB of RAM and 10-20 minutes.
+
+services:
+  new-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Build rather than pull, so `up` does not race ahead and fetch the
+    # registry image we are deliberately replacing.
+    pull_policy: build

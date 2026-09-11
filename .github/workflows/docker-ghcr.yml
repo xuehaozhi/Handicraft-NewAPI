@@ -1,0 +1,70 @@
+# Build the Handicraft API image in the cloud and publish it to the GitHub
+# Container Registry, so a deployment target never has to compile anything.
+#
+# Why this exists: building from source needs ~2 GB of RAM and 10-20 minutes
+# (Rsbuild frontend + Go backend). Doing that on a small VPS is unpleasant and
+# may OOM. With this workflow the server only runs `docker compose pull`.
+#
+# Authentication uses the built-in GITHUB_TOKEN, so no repository secrets need
+# to be configured. The upstream workflows in this directory push to Docker Hub
+# instead and require DOCKERHUB_USERNAME / DOCKERHUB_TOKEN; they are left
+# untouched and unused here.
+#
+# The image name is hardcoded in lowercase on purpose: GHCR rejects uppercase
+# repository paths, and this repository is named "Handicraft-NewAPI".
+
+name: Build and publish image to GHCR
+
+on:
+  push:
+    branches:
+      - custom/rc33
+    # A docs-only change does not alter the image, so do not spend a build on it.
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - 'NOTICE'
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/xuehaozhi/handicraft-newapi
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          # The deployment target is x86_64. Add linux/arm64 here if you ever
+          # move to an ARM host; it roughly doubles the build time.
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:sha-${{ github.sha }}
+          # Reuse layers between runs; the Go module and bun caches dominate.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # Fail the build rather than publish an image we cannot trust.
+          provenance: true
+          sbom: true
