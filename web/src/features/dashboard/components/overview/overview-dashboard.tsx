@@ -15,6 +15,14 @@ You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
+
+--------------------------------------------------------------------------
+Modifications for Handicraft — 2026-09-11
+
+This file was modified from the upstream new-api project: the welcome
+banner (<WelcomeBanner />) is now rendered as the first element of the
+dashboard overview. See ./welcome-banner.tsx.
+--------------------------------------------------------------------------
 */
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
@@ -66,6 +74,7 @@ import { FAQPanel } from './faq-panel'
 import { PerformanceHealthPanel } from './performance-health-panel'
 import { SummaryCards } from './summary-cards'
 import { UptimePanel } from './uptime-panel'
+import { WelcomeBanner } from './welcome-banner'
 
 const SETUP_GUIDE_VISIBILITY_STORAGE_KEY =
   'dashboard_overview_setup_guide_expanded'
@@ -619,6 +628,8 @@ export function OverviewDashboard() {
 
   return (
     <div className='flex flex-col gap-4'>
+      <WelcomeBanner />
+
       {setupGuideExpanded ? (
         <CardStaggerContainer className='grid items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]'>
           <CardStaggerItem className='bg-card h-full overflow-hidden rounded-2xl border shadow-xs'>

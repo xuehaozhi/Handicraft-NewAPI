@@ -11,6 +11,12 @@
 *.toml text eol=lf
 *.md text eol=lf
 
+# Docker Compose reads .env line by line. A CRLF checkout would append a stray
+# \r to every value, so the password would silently stop matching what Postgres
+# and Redis were started with. Pin LF regardless of the cloner's platform.
+.env text eol=lf
+.env.* text eol=lf
+
 # JavaScript/TypeScript files
 *.js text eol=lf
 *.jsx text eol=lf

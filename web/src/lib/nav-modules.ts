@@ -15,18 +15,26 @@ You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
+
+--------------------------------------------------------------------------
+Modifications for Handicraft — 2026-09-11
+
+Added a `statusMonitor` header nav module (enabled by default, requireAuth
+defaults to true) backing the /status-monitor page.
+--------------------------------------------------------------------------
 */
 import { getStatus } from '@/lib/api'
 
 export type ModuleAccess = { enabled: boolean; requireAuth: boolean }
 
-export type HeaderNavModule = 'rankings' | 'pricing'
+export type HeaderNavModule = 'rankings' | 'pricing' | 'statusMonitor'
 
 export type HeaderNavModules = {
   home: boolean
   console: boolean
   pricing: ModuleAccess
   rankings: ModuleAccess
+  statusMonitor: ModuleAccess
   docs: boolean
   about: boolean
   [key: string]: boolean | ModuleAccess
@@ -37,6 +45,10 @@ const DEFAULT_HEADER_NAV_MODULES: HeaderNavModules = {
   console: true,
   pricing: { enabled: true, requireAuth: false },
   rankings: { enabled: true, requireAuth: false },
+  // Handicraft addition. requireAuth defaults to true because the status
+  // monitor exposes host resource usage and platform-wide business volume;
+  // only the data is protected, the page itself stays reachable.
+  statusMonitor: { enabled: true, requireAuth: true },
   docs: true,
   about: true,
 }
@@ -44,6 +56,7 @@ const DEFAULT_HEADER_NAV_MODULES: HeaderNavModules = {
 const DEFAULTS: Record<HeaderNavModule, ModuleAccess> = {
   pricing: DEFAULT_HEADER_NAV_MODULES.pricing,
   rankings: DEFAULT_HEADER_NAV_MODULES.rankings,
+  statusMonitor: DEFAULT_HEADER_NAV_MODULES.statusMonitor,
 }
 
 function cloneHeaderNavDefaults(): HeaderNavModules {
@@ -51,6 +64,7 @@ function cloneHeaderNavDefaults(): HeaderNavModules {
     ...DEFAULT_HEADER_NAV_MODULES,
     pricing: { ...DEFAULT_HEADER_NAV_MODULES.pricing },
     rankings: { ...DEFAULT_HEADER_NAV_MODULES.rankings },
+    statusMonitor: { ...DEFAULT_HEADER_NAV_MODULES.statusMonitor },
   }
 }
 
@@ -116,6 +130,10 @@ export function parseHeaderNavModules(raw: unknown): HeaderNavModules {
     }
     if (key === 'rankings') {
       result.rankings = parseAccess(value, result.rankings)
+      return
+    }
+    if (key === 'statusMonitor') {
+      result.statusMonitor = parseAccess(value, result.statusMonitor)
       return
     }
 

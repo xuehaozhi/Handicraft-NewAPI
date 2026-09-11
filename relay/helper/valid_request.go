@@ -1,5 +1,10 @@
 package helper
 
+// Modifications for Handicraft — 2026-09-11:
+// GetAndValidateRequest now calls RejectImageInput after parsing, so any
+// request carrying image content is refused for every relay format. See
+// image_input_guard.go for the rationale and the known gaps.
+
 import (
 	"errors"
 	"fmt"
@@ -54,7 +59,18 @@ func GetAndValidateRequest(c *gin.Context, format types.RelayFormat) (request dt
 	default:
 		return nil, fmt.Errorf("unsupported relay format: %s", format)
 	}
-	return request, err
+	if err != nil {
+		return nil, err
+	}
+
+	// Handicraft: every format is parsed by this one function, so refusing
+	// image content here covers all models without per-channel configuration.
+	// Placed after parsing so it can inspect the DTO rather than raw bytes.
+	if err = RejectImageInput(request); err != nil {
+		return nil, err
+	}
+
+	return request, nil
 }
 
 func GetAndValidAudioRequest(c *gin.Context, relayMode int) (*dto.AudioRequest, error) {

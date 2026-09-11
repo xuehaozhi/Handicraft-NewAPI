@@ -15,6 +15,13 @@ You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
+
+--------------------------------------------------------------------------
+Modifications for Handicraft — 2026-09-11
+
+Added the "Status Monitor" entry pointing at /status-monitor, gated by the
+new statusMonitor header nav module.
+--------------------------------------------------------------------------
 */
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -84,6 +91,23 @@ export function useTopNavLinks(): TopNavLink[] {
   if (rankings && typeof rankings === 'object' && rankings.enabled) {
     const requiresAuth = rankings.requireAuth && !isAuthed
     links.push({ title: t('Rankings'), href: '/rankings', requiresAuth })
+  }
+
+  // Status Monitor (Handicraft addition). requireAuth defaults to true, so an
+  // anonymous visitor gets the header's sign-in prompt instead of navigating;
+  // the page itself still guards direct URL access with an in-page prompt.
+  const statusMonitor = modules?.statusMonitor
+  if (
+    statusMonitor &&
+    typeof statusMonitor === 'object' &&
+    statusMonitor.enabled
+  ) {
+    const requiresAuth = statusMonitor.requireAuth && !isAuthed
+    links.push({
+      title: t('Status Monitor'),
+      href: '/status-monitor',
+      requiresAuth,
+    })
   }
 
   // Docs (supports external links)

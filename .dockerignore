@@ -10,3 +10,21 @@ docs
 /web/node_modules
 /web/dist
 !THIRD-PARTY-LICENSES.md
+
+# Handicraft additions.
+# These are local build output and runtime state. They must never enter the
+# image: the Dockerfile does `COPY . .`, so anything listed here would be baked
+# into the published layers. handicraft-local.db in particular contains real
+# account data (usernames and bcrypt password hashes), and the two binaries are
+# >120 MB each, which inflates the build context sent to the Docker daemon.
+handicraft-*
+*.db
+*.db-shm
+*.db-wal
+logs
+
+# Host-side compose secrets. docker compose reads .env for variable
+# substitution; it is never needed inside the build context, and `COPY . .`
+# would otherwise pull the Postgres and Redis passwords into a builder layer.
+.env
+.env.*

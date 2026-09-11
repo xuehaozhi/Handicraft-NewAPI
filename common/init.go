@@ -32,10 +32,9 @@ func printHelp() {
 func InitEnv() {
 	flag.Parse()
 
-	envVersion := os.Getenv("VERSION")
-	if envVersion != "" {
-		Version = envVersion
-	}
+	// 有意移除了上游的 VERSION 环境变量覆盖逻辑:
+	// 本构建的版本号由 common/constants.go 中的 Version 常量强制固定,
+	// 不允许通过环境变量改写。
 
 	if *PrintVersion {
 		fmt.Println(Version)

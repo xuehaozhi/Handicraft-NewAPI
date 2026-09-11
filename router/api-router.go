@@ -40,6 +40,10 @@ func SetApiRouter(router *gin.Engine) {
 			perfMetricsRoute.GET("", controller.GetPerfMetrics)
 		}
 		apiRouter.GET("/rankings", middleware.HeaderNavModuleAuth("rankings"), controller.GetRankings)
+		// Status monitor (Handicraft addition). Deliberately behind UserAuth():
+		// the payload exposes host resource usage and aggregate business volume,
+		// so it must not sit in the anonymous group above.
+		apiRouter.GET("/status-monitor", middleware.UserAuth(), middleware.DisableCache(), controller.GetStatusMonitor)
 		apiRouter.GET("/verification", middleware.EmailVerificationRateLimit(), middleware.TurnstileCheck(), controller.SendEmailVerification)
 		apiRouter.GET("/reset_password", middleware.CriticalRateLimit(), middleware.TurnstileCheck(), controller.SendPasswordResetEmail)
 		apiRouter.POST("/user/reset", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.ResetPassword)

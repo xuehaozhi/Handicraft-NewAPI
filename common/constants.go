@@ -11,8 +11,19 @@ import (
 )
 
 var StartTime = time.Now().Unix() // unit: second
-var Version = "v0.0.0"            // this hard coding will be replaced automatically when building, no need to manually change
-var SystemName = "New API"
+
+// Version 是构建版本的唯一权威来源, 有意硬编码固定值。
+// 与上游 new-api 不同, 此处不再由构建期 ldflags 或 VERSION 环境变量覆盖:
+// - common/init.go 中的 VERSION 环境变量覆盖逻辑已被移除
+// - Dockerfile 与 build-linux.ps1 均不再传递 -X common.Version
+// 如需改版本号, 请修改这一行, 不要恢复上述任何覆盖路径。
+var Version = "Handicraft Bate 1.0.1"
+
+// SystemName 是站点对外展示名称的唯一权威来源: 经 /api/status 的 system_name 下发,
+// 前端据此设置浏览器标签标题、侧边栏品牌名与页脚。
+// 注意: 它同时被注册为可持久化的系统选项(model/option.go), 管理员在后台修改后
+// 数据库中的值会覆盖此处的默认值。此处只决定全新实例的初始名称。
+var SystemName = "Handicraft API"
 var Footer = ""
 var Logo = ""
 var TopUpLink = ""

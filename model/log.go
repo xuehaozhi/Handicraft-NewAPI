@@ -694,6 +694,44 @@ func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	return token
 }
 
+// GlobalUsageTotals 全站累计用量。
+//
+// Added for Handicraft (2026-09-11) to back the status monitor page.
+type GlobalUsageTotals struct {
+	TotalRequests int64 `json:"total_requests"`
+	TotalTokens   int64 `json:"total_tokens"`
+	TotalQuota    int64 `json:"total_quota"`
+}
+
+// GetGlobalUsageTotals 用单次扫描同时得出调用次数、token 总量与消耗额度,
+// 避免同一张表被聚合三遍。
+//
+// 这是一次全表聚合, 调用方必须自行缓存, 不要在每个请求上直接调用。
+func GetGlobalUsageTotals() (GlobalUsageTotals, error) {
+	var row struct {
+		TotalRequests int64
+		TotalTokens   int64
+		TotalQuota    int64
+	}
+
+	err := LOG_DB.Table("logs").
+		Select("COUNT(*) AS total_requests, " +
+			"COALESCE(SUM(prompt_tokens), 0) + COALESCE(SUM(completion_tokens), 0) AS total_tokens, " +
+			"COALESCE(SUM(quota), 0) AS total_quota").
+		Where("type = ?", LogTypeConsume).
+		Scan(&row).Error
+	if err != nil {
+		common.SysError("failed to query global usage totals: " + err.Error())
+		return GlobalUsageTotals{}, err
+	}
+
+	return GlobalUsageTotals{
+		TotalRequests: row.TotalRequests,
+		TotalTokens:   row.TotalTokens,
+		TotalQuota:    row.TotalQuota,
+	}, nil
+}
+
 func CountOldLog(ctx context.Context, targetTimestamp int64) (int64, error) {
 	var total int64
 	if err := LOG_DB.WithContext(ctx).Model(&Log{}).Where("created_at < ?", targetTimestamp).Count(&total).Error; err != nil {

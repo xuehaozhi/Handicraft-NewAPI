@@ -25,7 +25,9 @@ RUN go mod download
 
 COPY . .
 COPY --from=builder /build/web/dist ./web/dist
-RUN go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$(cat VERSION)'" -o new-api
+# 版本号由 common/constants.go 中的 Version 常量强制固定, 不在此注入 -X common.Version,
+# 否则 VERSION 文件为空时会把版本号覆盖成空字符串。
+RUN go build -ldflags "-s -w" -o new-api
 
 FROM debian:bookworm-slim@sha256:f06537653ac770703bc45b4b113475bd402f451e85223f0f2837acbf89ab020a
 

@@ -67,28 +67,19 @@ var DB *gorm.DB
 
 var LOG_DB *gorm.DB
 
-func createRootAccountIfNeed() error {
-	var user User
-	//if user.Status != common.UserStatusEnabled {
-	if err := DB.First(&user).Error; err != nil {
-		common.SysLog("no user exists, create a root user for you: username is root, password is 123456")
-		hashedPassword, err := common.Password2Hash("123456")
-		if err != nil {
-			return err
-		}
-		rootUser := User{
-			Username:    "root",
-			Password:    hashedPassword,
-			Role:        common.RoleRootUser,
-			Status:      common.UserStatusEnabled,
-			DisplayName: "Root User",
-			AccessToken: nil,
-			Quota:       100000000,
-		}
-		DB.Create(&rootUser)
-	}
-	return nil
-}
+// Handicraft (2026-09-11): createRootAccountIfNeed() was removed here.
+//
+// It created a hardcoded administrator — username "root", password "123456" —
+// whenever the users table was empty. It had no callers anywhere in the tree,
+// so it was already dormant, but it is deleted rather than left in place so
+// that a future upstream merge cannot silently re-arm a known default
+// credential on a public deployment.
+//
+// The live path is unchanged and requires no deployment-time credentials:
+// main.go calls CheckSetup() below, which leaves constant.Setup false when no
+// setup record and no root user exist. The frontend then shows the first-run
+// wizard, and controller.PostSetup creates the administrator from the name and
+// password the operator types in.
 
 func CheckSetup() {
 	setup := GetSetup()
