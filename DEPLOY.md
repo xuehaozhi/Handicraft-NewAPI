@@ -106,8 +106,14 @@ chmod 600 .env
 生成一个强密码：
 
 ```bash
-openssl rand -base64 32
+openssl rand -hex 32
 ```
+
+> ⚠️ **必须用 `-hex`，不要用 `-base64`。** 密码会被嵌进 URL
+> （`redis://:密码@redis:6379`），而 base64 字符表含 `/` 和 `+`——`/` 会被 URL 解析器
+> 当作路径分隔符，导致连接串解析失败。实测 `openssl rand -base64 32` 生成的密码
+> **2000 次采样全部含特殊字符**，也就是说用 base64 基本必然连不上 Redis。
+> hex 输出只含 `0-9a-f`，URL 安全。
 
 编辑 `.env`，只需填**一个**必填项：
 

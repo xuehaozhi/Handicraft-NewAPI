@@ -19,11 +19,16 @@ on:
   push:
     branches:
       - custom/rc33
-    # A docs-only change does not alter the image, so do not spend a build on it.
+    # Changes that cannot alter the image do not deserve a 20-minute build.
+    # The compose files, .env template and docs are all deployment-side only;
+    # the image is produced solely from the Dockerfile and the source it copies.
     paths-ignore:
       - '**.md'
       - 'LICENSE'
       - 'NOTICE'
+      - 'docker-compose*.yml'
+      - '.dockerignore'
+      - '.env.example'
   workflow_dispatch:
 
 env:
