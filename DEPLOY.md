@@ -11,17 +11,59 @@
 
 镜像由 GitHub Actions **在云端构建**并推送到 GHCR，服务器**只负责拉取，不需要编译**。
 
-| 项目 | 要求 | 检查命令 |
+| 项目 | 最低 | 建议 | 检查命令 |
+| --- | --- | --- | --- |
+| Docker | 20.10+ | — | `docker --version` |
+| Docker Compose | v2 | — | `docker compose version` |
+| 内存 | 512 MB（**必须配 swap**，见 1.2） | 1 GB | `free -h` |
+| 磁盘 | 3 GB 可用 | 10 GB | `df -h /` |
+| 网络 | 能访问 `ghcr.io` | — | — |
+
+### 1.1 内存预算（512 MB 机器）
+
+默认配置已针对小内存主机调整——**数据库用 SQLite 而非 PostgreSQL**，Redis 内存上限也降到 64 MB：
+
+| 组件 | 占用 | 说明 |
 | --- | --- | --- |
-| Docker | 20.10+ | `docker --version` |
-| Docker Compose | v2（用 `docker compose`，非 `docker-compose`） | `docker compose version` |
-| 内存 | ≥ 1 GB | `free -h` |
-| 磁盘 | ≥ 5 GB 可用 | `df -h /` |
-| 网络 | 能访问 `ghcr.io` 和 Docker Hub | — |
+| 操作系统 + Docker | 70–100 MB | |
+| new-api 应用 | 200–300 MB | |
+| Redis | 20–50 MB | 上限 64 MB，实际按需分配 |
+| **合计** | **约 300–450 MB** | 512 MB 可运行 |
 
-内存和磁盘要求都不高，因为服务器不再承担构建工作。
+对比：若改用 PostgreSQL，它单独就要 150–250 MB，合计超过 512 MB，**会被 OOM Killer 杀掉**。所以默认不启用它。
 
-> 仅当你选择"从源码构建"（见第 4.2 节）时，才需要 ≥ 2 GB 内存和 10–20 分钟编译时间。
+> PostgreSQL 保留在 `docker-compose.yml` 中但被 `profiles` 门控，默认不启动。
+> 内存 ≥2 GB 的机器可以启用，见 4.4 节。
+
+### 1.2 配置 swap（512 MB 机器必做）
+
+512 MB 内存的机器**不配 swap 会随机被 OOM 杀掉进程**。2 GB swap 文件能显著提升稳定性：
+
+```bash
+# 先看是否已有
+free -h
+swapon --show
+
+# 创建 2 GB swap
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+
+# 开机自动启用
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+# 降低交换倾向：有 swap 兜底，但优先用物理内存
+sudo sysctl vm.swappiness=10
+echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf
+```
+
+验证：`free -h` 的 Swap 行应显示 2.0Gi。
+
+### 1.3 关于从源码构建
+
+仅当你选择本地构建（见 4.2 节）时才需要 ≥2 GB 内存和 10–20 分钟编译时间。
+默认流程（拉取云端镜像）用不到，512 MB 机器请**不要**尝试本地构建。
 
 ---
 
@@ -61,32 +103,33 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-生成两个强密码（**分两次执行，得到两个不同的值**）：
+生成一个强密码：
 
 ```bash
 openssl rand -base64 32
 ```
 
-编辑 `.env`，填入两个必填项：
+编辑 `.env`，只需填**一个**必填项：
 
 ```ini
-POSTGRES_PASSWORD=<第一个随机值>
-REDIS_PASSWORD=<第二个随机值>
+REDIS_PASSWORD=<上面生成的随机值>
 ```
 
-其余两项有默认值，可不动：
+其余有默认值，可不动：
 
 ```ini
+POSTGRES_PASSWORD=          # 默认数据库是 SQLite，此项留空即可
 REDIS_POOL_SIZE=10
-REDIS_MAXMEMORY=512mb
+REDIS_MAXMEMORY=64mb
 ```
 
-**不要重复使用同一个密码。** Redis 里存的是真实状态（登录会话、预扣费额度、限流计数），
-而 Postgres 存的是业务数据，两者隔离更安全。
+`POSTGRES_PASSWORD` 只在启用 PostgreSQL 时才需要（见 4.4 节）。默认的 SQLite 是进程内数据库，
+不需要密码，也不会因为这一项为空而阻止启动。
 
+> **只有 `REDIS_PASSWORD` 是硬性必填。** 留空的话 `docker compose up` 会直接报错中止并指出变量名——
+> 这是刻意的设计，避免带着已知默认密码静默启动。
+>
 > `.env` 已被 `.gitignore` 和 `.dockerignore` 排除，不会被提交，也不会进入镜像。
-> 若必填项留空或缺失，`docker compose up` 会直接报错中止并指出变量名——这是刻意的设计，
-> 避免带着已知默认密码静默启动。
 
 ---
 
@@ -108,10 +151,8 @@ docker compose up -d
 docker login ghcr.io -u xuehaozhi
 ```
 
-**建议把镜像包设为公开**（一次性操作，之后服务器无需任何凭据）：
-
-> GitHub → 你的头像 → Your packages → `handicraft-newapi` → Package settings →
-> Change visibility → Public
+**包已确认为公开**（匿名可读 manifest），因此服务器**不需要任何凭据**即可拉取，
+上面的 `docker login` 通常可以跳过。若日后改为私有，再执行它。
 
 镜像由 `.github/workflows/docker-ghcr.yml` 在每次推送到 `custom/rc33` 时自动构建。
 在 GitHub 仓库的 **Actions** 标签页可以看到构建进度；构建完成前，GHCR 上还没有镜像，
@@ -125,15 +166,36 @@ docker login ghcr.io -u xuehaozhi
 docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
 
-需要 ≥ 2 GB 内存，耗时 10–20 分钟。
+需要 ≥ 2 GB 内存，耗时 10–20 分钟。**512 MB 机器不要尝试**，会 OOM。
 
 ### 4.3 确认服务状态
 
 ```bash
 docker compose ps
+free -h
 ```
 
-三个服务都应为 `running`，其中 `redis` 和 `postgres` 应显示 `(healthy)`。
+默认应只有**两个**服务：`new-api` 和 `redis`，且 `redis` 显示 `(healthy)`。
+没有 `postgres` 是正常的——默认用 SQLite。
+
+`free -h` 应显示内存仍有富余；若 available 长期低于 50 MB，考虑升级内存或减少并发。
+
+### 4.4 可选：改用 PostgreSQL（需 ≥2 GB 内存）
+
+SQLite 对单机部署足够，但并发写入能力有限。若日后升级到内存 ≥2 GB 的机器：
+
+1. 在 `.env` 中设置 `POSTGRES_PASSWORD`
+2. 在 `docker-compose.yml` 中取消注释 `SQL_DSN` 那一行
+3. 在同一文件中取消注释 `depends_on` 里的 `postgres` 条目
+4. 用 profile 启动：
+
+```bash
+docker compose --profile postgres up -d
+```
+
+Postgres 的 `shared_buffers` 等参数已在文件中针对小内存调低（默认的 128 MB 就占掉四分之一）。
+
+> SQLite 与 PostgreSQL 的数据**互不兼容**，切换是重新开始。已有数据需要自行迁移。
 
 ---
 
@@ -263,8 +325,8 @@ HTTP 400
 sudo ufw allow 3000/tcp
 ```
 
-**注意**：Postgres 和 Redis 的端口在 compose 中是注释掉的，只在 Docker 内网可达，不对外暴露。
-不要取消注释。
+**注意**：只有 3000 端口需要对外开放。Redis（以及启用 profile 时的 Postgres）的端口在
+compose 中是注释掉的，只在 Docker 内网可达，**不要取消注释**。
 
 ---
 
@@ -308,22 +370,29 @@ docker compose up -d
 
 ### 备份
 
-数据库（业务数据，最重要）：
+数据库是 SQLite，就是 `./data` 目录里的文件（业务数据，最重要）。**直接复制文件即可**：
 
 ```bash
-docker compose exec postgres pg_dump -U root new-api > backup-$(date +%F).sql
+# 用 sqlite3 的在线备份，避免 WAL 模式下直接 cp 拿到不一致的快照
+docker compose exec new-api sh -c \
+  'command -v sqlite3 >/dev/null && sqlite3 /data/one-api.db ".backup /data/backup.db" || cp /data/one-api.db /data/backup.db'
+cp ./data/backup.db ./backup-$(date +%F).db
 ```
 
-恢复：
+更简单的做法（短暂停机，保证一致性）：
 
 ```bash
-cat backup-2026-09-11.sql | docker compose exec -T postgres psql -U root -d new-api
+docker compose stop new-api
+tar -czf backup-$(date +%F).tar.gz data/
+docker compose start new-api
 ```
 
-Redis 数据存放在 `redis_data` 卷中（已启用 AOF 持久化）。会话过期后可从数据库重建缓存，
-但备份数据库即可覆盖主要风险。
+恢复：把备份的 `data/` 解压回原位后 `docker compose up -d`。
 
-数据卷位置：
+Redis 数据在 `redis_data` 卷中（已启用 AOF 持久化）。里面是缓存、会话和限流计数，
+丢了会导致所有人重新登录，但不会丢业务数据。**只需备份数据库。**
+
+查看数据卷：
 
 ```bash
 docker volume ls | grep handicraft
@@ -335,31 +404,32 @@ docker volume ls | grep handicraft
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
-| `docker compose up` 报 `POSTGRES_PASSWORD must be set` | `.env` 不存在或必填项为空 | 按第三节填写 `.env` |
-| new-api 容器反复重启 | Redis/Postgres 未就绪或密码不匹配 | `docker compose logs redis postgres`，核对 `.env` 密码 |
+| `docker compose up` 报 `REDIS_PASSWORD must be set` | `.env` 不存在或该项为空 | 按第三节填写 `.env` |
+| new-api 容器反复重启 | Redis 未就绪或密码不匹配 | `docker compose logs redis`，核对 `.env` 密码 |
 | 日志出现 `Redis ping test failed` | Redis 密码与 `REDIS_CONN_STRING` 不一致 | 两处都取自 `${REDIS_PASSWORD}`，确认 `.env` 已生效 |
+| 容器被 Killed（退出码 137） | **内存不足被 OOM Killer 杀掉** | 按 1.2 节配置 swap；或改用更小内存占用 |
+| `docker compose pull` 失败 | 镜像尚未构建完成，或包被设为私有 | 去仓库 Actions 页确认构建成功 |
 | 所有 API 返回 503 `no available channel` | 未添加上游渠道 | 后台「渠道」中添加 |
-| 改了 `POSTGRES_PASSWORD` 后连不上数据库 | **Postgres 密码只在数据卷首次初始化时生效** | 见下方说明 |
-| 构建时前端 OOM | 内存不足 | 加内存或加 swap |
-| Redis 内存写满报错 | 达到 `REDIS_MAXMEMORY` | 调高该值；策略为 `noeviction`，不会静默淘汰数据 |
+| Redis 内存写满报错 | 达到 `REDIS_MAXMEMORY`（默认 64 MB） | 先确认机器还有空闲内存，再调高该值 |
+| `docker compose ps` 里没有 postgres | **正常**，默认用 SQLite | 见 4.4 节 |
 
-### 关于修改 Postgres 密码
+### 关于退出码 137 / OOM
 
-`POSTGRES_PASSWORD` **仅在数据卷为空时**（首次初始化）用于创建账号。之后修改 `.env`
-不会改变数据库里已有的密码，容器会因认证失败而无法启动。
-
-两种处理方式：
+512 MB 机器上最容易踩的坑。判断方法：
 
 ```bash
-# 方式一：进数据库改密码（保留数据）
-docker compose exec postgres psql -U root -d new-api -c "ALTER USER root WITH PASSWORD '新密码';"
-# 然后同步修改 .env 并重启
-
-# 方式二：清空数据卷重建（会丢失所有数据）
-docker compose down
-docker volume rm handicraft_pg_data
-docker compose up -d
+docker inspect new-api --format '{{.State.ExitCode}} {{.State.OOMKilled}}'
+# OOMKilled 为 true 即确认是内存问题
+dmesg | grep -i 'killed process' | tail -5
 ```
+
+处理顺序：先确认 swap 已启用（1.2 节），再考虑降低 `REDIS_MAXMEMORY`、
+限制 `RELAY_TIMEOUT` 并发，最后才是升级内存。
+
+### 关于 SQLite 的并发写入
+
+SQLite 默认已启用 WAL 模式与 30 秒 busy timeout，单机中小流量足够。
+若出现 `database is locked` 频繁报错，说明写并发偏高，此时才考虑 4.4 节的 PostgreSQL。
 
 ### 关于 Redis 内存策略
 
@@ -386,7 +456,7 @@ docker compose up -d
 
 2. **保持 2FA 开启**，定期轮换 API Key
 3. **不要提交 `.env`**（已在 `.gitignore` 中）
-4. 定期更新基础镜像，修补 Redis / Postgres 漏洞
+4. 定期更新基础镜像，修补 Redis 漏洞
 
 ---
 

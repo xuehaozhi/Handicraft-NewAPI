@@ -39,7 +39,20 @@ services:
       - ./data:/data
       - ./logs:/app/logs
     environment:
-      - SQL_DSN=postgresql://root:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/new-api
+      # Database: SQLite by default, stored at /data/one-api.db inside the
+      # ./data volume (the image's WORKDIR is /data, and SQLITE_PATH defaults to
+      # a relative "one-api.db" that resolves there).
+      #
+      # SQLite is the right choice on a small host. PostgreSQL needs roughly
+      # 150-250 MB of RAM on its own, on top of the ~200-300 MB the application
+      # uses, which does not fit in a 512 MB VPS. SQLite runs in-process and
+      # costs nothing extra. The default DSN already enables WAL journaling and
+      # a 30s busy timeout, so concurrent reads and writes behave acceptably.
+      #
+      # To use PostgreSQL instead (needs >= 2 GB RAM), uncomment the SQL_DSN line
+      # below, uncomment the `postgres:` service further down, and restore it in
+      # depends_on. Set POSTGRES_PASSWORD in .env first.
+#      - SQL_DSN=postgresql://root:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/new-api
 #      - SQL_DSN=root:123456@tcp(mysql:3306)/new-api  # Point to the mysql service, uncomment if using MySQL
 #      - LOG_SQL_DSN=postgresql://root:123456@postgres:5432/new-api-log # OPTIONAL: If you want a separate database for logging, uncomment and set this
 #      - LOG_SQL_DSN=clickhouse://default:123456@clickhouse:9000/new_api_logs # OPTIONAL: Use ClickHouse for logs only; also uncomment clickhouse in depends_on and the clickhouse service below
@@ -71,16 +84,19 @@ services:
 #      - UMAMI_WEBSITE_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx  # Umami 网站 ID (Umami Website ID)
 #      - UMAMI_SCRIPT_URL=https://analytics.umami.is/script.js  # Umami 脚本 URL，默认为官方地址 (Umami Script URL, defaults to official URL)
 
-    # Wait until Redis and Postgres actually accept connections, not merely until
-    # their containers exist. NewAPI calls FatalLog when it cannot reach either
-    # dependency (common.InitRedisClient pings Redis and dies on failure), so a
-    # bare `depends_on` list makes the container exit and restart in a loop on
-    # first boot until the dependencies happen to win the race.
+    # Wait until Redis actually accepts connections, not merely until its
+    # container exists. NewAPI calls FatalLog when it cannot reach Redis
+    # (common.InitRedisClient pings it and dies on failure), so a bare
+    # `depends_on` list makes the container exit and restart in a loop on first
+    # boot until the dependency happens to win the race.
+    #
+    # PostgreSQL is absent on purpose: the default database is SQLite, which
+    # runs in-process. See the SQL_DSN comment above to re-enable it.
     depends_on:
       redis:
         condition: service_healthy
-      postgres:
-        condition: service_healthy
+#      postgres:  # Uncomment together with SQL_DSN above if using PostgreSQL
+#        condition: service_healthy
 #      mysql:  # Uncomment if using MySQL
 #        condition: service_healthy
 #      clickhouse:  # Uncomment if using ClickHouse for LOG_SQL_DSN
@@ -119,7 +135,11 @@ services:
       - --appendfsync
       - everysec
       - --maxmemory
-      - ${REDIS_MAXMEMORY:-512mb}
+      # Sized for a small host. Redis here is caches, sessions and rate-limit
+      # counters, not a primary store; 64 MB is ample for a single-node
+      # deployment. Do not raise this without checking total RAM: the
+      # application alone uses 200-300 MB, so a 512 MB VPS cannot spare more.
+      - ${REDIS_MAXMEMORY:-64mb}
       - --maxmemory-policy
       - noeviction
     environment:
@@ -137,13 +157,42 @@ services:
     networks:
       - new-api-network
 
+  # Disabled by default: SQLite is the default database and needs no separate
+  # process. PostgreSQL consumes roughly 150-250 MB of RAM on its own, which
+  # does not fit alongside the application on a 512 MB VPS.
+  #
+  # To enable on a host with >= 2 GB RAM: set POSTGRES_PASSWORD in .env,
+  # uncomment the SQL_DSN line above, uncomment the postgres entry in
+  # depends_on, and start with the profile:
+  #   docker compose --profile postgres up -d
   postgres:
+    profiles: ["postgres"]
     image: postgres:15
     container_name: postgres
     restart: always
+    # Tuned down from the defaults, which assume a much larger host. The
+    # postgres:15 default shared_buffers alone is 128 MB.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=32MB
+      - -c
+      - max_connections=20
+      - -c
+      - work_mem=1MB
+      - -c
+      - maintenance_work_mem=16MB
+      - -c
+      - effective_cache_size=128MB
     environment:
       POSTGRES_USER: root
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # Deliberately NOT `${POSTGRES_PASSWORD:?...}`: Docker Compose performs
+      # variable interpolation across the whole file, including services whose
+      # profile is inactive, so a hard-required variable here would block the
+      # default SQLite deployment. An empty value makes the Postgres entrypoint
+      # refuse to start with "you must specify POSTGRES_PASSWORD", which is the
+      # right failure when someone enables the profile without setting it.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       POSTGRES_DB: new-api
     # new-api waits on service_healthy, so Postgres needs a real readiness
     # probe; without one the dependency condition could never be satisfied.
