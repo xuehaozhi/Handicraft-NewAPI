@@ -62,6 +62,14 @@ export type PricingModel = {
   audio_ratio?: number | null
   audio_completion_ratio?: number | null
   enable_groups: string[]
+  /**
+   * How many distinct enabled channels serve this model, across every group.
+   * Computed by the backend; 0 or 1 means a single upstream, in which case the
+   * model square shows no tier badge.
+   *
+   * Handicraft addition (2026-09-11).
+   */
+  channel_count?: number
   tags?: string
   supported_endpoint_types?: string[]
   key?: string

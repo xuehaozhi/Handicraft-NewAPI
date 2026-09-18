@@ -39,6 +39,7 @@ import { formatPrice, formatRequestPrice } from '../lib/price'
 import type { PricingModel, TokenUnit } from '../types'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelPerfBadge, type ModelPerfBadgeData } from './model-perf-badge'
+import { ModelTierBadge } from './model-tier-badge'
 
 export interface ModelCardProps {
   model: PricingModel
@@ -264,6 +265,9 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
             </h3>
             <div className='mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm sm:mt-1 sm:gap-x-3'>
               {priceSummary}
+              {/* Sits beside the price so the number of upstreams reads as part
+                  of the pricing story. Renders nothing for a single channel. */}
+              <ModelTierBadge model={props.model} className='self-center' />
             </div>
           </div>
         </div>

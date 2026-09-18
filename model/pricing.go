@@ -1,5 +1,10 @@
 package model
 
+// Modifications for Handicraft — 2026-09-11:
+// Pricing gained a ChannelCount field reporting how many distinct enabled
+// channels serve each model, computed in updatePricing from the enabled
+// abilities. The model square renders it as a tier badge.
+
 import (
 	"fmt"
 	"maps"
@@ -40,6 +45,14 @@ type Pricing struct {
 	BillingUsageSchema     map[string]jsplugin.UsageFieldSchema `json:"billing_usage_schema,omitempty"`
 	BillingUsageExamples   []jsplugin.UsageExample              `json:"billing_usage_examples,omitempty"`
 	PricingVersion         string                               `json:"pricing_version,omitempty"`
+
+	// ChannelCount is how many distinct enabled channels currently serve this
+	// model, across every group. The model square renders it as a tier badge
+	// ("N 档") so users can see when a model is reachable through more than one
+	// upstream.
+	//
+	// Handicraft addition (2026-09-11).
+	ChannelCount int `json:"channel_count"`
 }
 
 type PricingVendor struct {
@@ -263,6 +276,10 @@ func updatePricing() {
 	}
 
 	modelGroupsMap := make(map[string]*types.Set[string])
+	// Handicraft: distinct enabled channels per model. Counted globally (not
+	// per group) because the badge answers "how many upstreams offer this
+	// model at all"; the pricing list is already filtered per user group.
+	modelChannelIDs := make(map[string]map[int]struct{})
 
 	for _, ability := range enableAbilities {
 		groups, ok := modelGroupsMap[ability.Model]
@@ -271,6 +288,13 @@ func updatePricing() {
 			modelGroupsMap[ability.Model] = groups
 		}
 		groups.Add(ability.Group)
+
+		ids, ok := modelChannelIDs[ability.Model]
+		if !ok {
+			ids = make(map[int]struct{})
+			modelChannelIDs[ability.Model] = ids
+		}
+		ids[ability.ChannelId] = struct{}{}
 	}
 
 	//这里使用切片而不是Set，因为一个模型可能支持多个端点类型，并且第一个端点是优先使用端点
@@ -365,6 +389,7 @@ func updatePricing() {
 			ModelName:              model,
 			EnableGroup:            groups.Items(),
 			SupportedEndpointTypes: modelSupportEndpointTypes[model],
+			ChannelCount:           len(modelChannelIDs[model]),
 		}
 
 		// 补充模型元数据（描述、标签、供应商、状态）
