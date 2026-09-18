@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/relayconvert/reasoning"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
+	"github.com/QuantumNous/new-api/setting/channel_pricing_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	hostreasoning "github.com/QuantumNous/new-api/setting/reasoning"
@@ -258,6 +259,47 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (hostt
 		GroupRatioInfo: groupRatioInfo,
 	}
 	return priceData, nil
+}
+
+// ApplyChannelPrice replaces the ratio the price estimate was built from with the
+// price of the channel that was actually selected, when that channel prices this
+// model itself.
+//
+// It runs after channel selection rather than during the estimate, because Relay
+// builds PriceData before any channel exists — the request is priced, pre-charged
+// and only then routed. The charge is what a retry re-runs this for, so the final
+// amount always follows the channel that served the request.
+//
+// A model billed a fixed amount per request is left alone: a per-1M-token price
+// has nothing to say about it.
+func ApplyChannelPrice(info *relaycommon.RelayInfo, channelID int) {
+	if info == nil || channelID == 0 || info.PriceData.UsePrice {
+		return
+	}
+	price, ok := channelPriceFor(info.GetBillingModelName(), info.GetOriginModelName(), channelID)
+	if !ok {
+		return
+	}
+	info.PriceData.ModelRatio = channel_pricing_setting.ModelRatioForPrice(price)
+}
+
+// channelPriceFor returns the price the given channel charges for this model, if
+// it has one of its own.
+//
+// The price is looked up under the model name the administrator configured it
+// for. That is the name the request asked for, which is not always the name
+// billing settled on: a request may carry `@key:value` modifiers, or name a model
+// that has no global price and therefore has no canonical billing entry.
+func channelPriceFor(billingModelName, originModelName string, channelID int) (float64, bool) {
+	for _, name := range []string{billingModelName, originModelName} {
+		if name == "" {
+			continue
+		}
+		if price, ok := channel_pricing_setting.GetChannelModelPrice(name, channelID); ok {
+			return price, true
+		}
+	}
+	return 0, false
 }
 
 func HasModelBillingConfig(modelName string) bool {

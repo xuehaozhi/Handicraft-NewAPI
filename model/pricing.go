@@ -8,6 +8,8 @@ package model
 import (
 	"fmt"
 	"maps"
+	"sort"
+	"strconv"
 	"strings"
 
 	"sync"
@@ -18,6 +20,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
+	"github.com/QuantumNous/new-api/setting/channel_pricing_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 )
@@ -53,6 +56,19 @@ type Pricing struct {
 	//
 	// Handicraft addition (2026-09-11).
 	ChannelCount int `json:"channel_count"`
+
+	// ChannelPrices holds the per-channel prices configured for this model,
+	// in the same unit as the model price the caller already displays (i.e.
+	// per 1M tokens, before the group ratio), sorted cheapest first.
+	//
+	// Handicraft addition (2026-09-11). Empty for every deployment that does
+	// not use per-channel pricing, so `omitempty` keeps the payload of those
+	// deployments byte-for-byte identical to upstream.
+	//
+	// Deliberately prices only, no channel identity: this payload is served by
+	// the anonymous pricing endpoint, and naming the upstreams a site resells
+	// would leak its supply chain.
+	ChannelPrices []float64 `json:"channel_prices,omitempty"`
 }
 
 type PricingVendor struct {
@@ -412,6 +428,9 @@ func updatePricing() {
 			pricing.ModelRatio = modelRatio
 			pricing.CompletionRatio = ratio_setting.GetCompletionRatio(model)
 			pricing.QuotaType = 0
+			// Per-channel prices are expressed per 1M tokens, so they only mean
+			// something where this model is billed per token.
+			pricing.ChannelPrices = configuredChannelPrices(model, modelChannelIDs[model])
 		}
 		if cacheRatio, ok := ratio_setting.GetCacheRatio(model); ok {
 			pricing.CacheRatio = &cacheRatio
@@ -489,6 +508,33 @@ func updatePricing() {
 	modelEnableGroupsLock.Unlock()
 
 	lastGetPricingTime = time.Now()
+}
+
+// configuredChannelPrices returns the prices configured for the channels that
+// currently serve a model, cheapest first. Channels that serve the model but
+// have no price of their own are not listed: they bill at the model price, which
+// the caller already shows next to the badge.
+//
+// Returns nil when nothing is configured, which is every deployment that does
+// not use per-channel pricing.
+func configuredChannelPrices(model string, servingChannels map[int]struct{}) []float64 {
+	configured := channel_pricing_setting.GetModelChannelPrices(model)
+	if len(configured) == 0 {
+		return nil
+	}
+	prices := make([]float64, 0, len(configured))
+	for channelID := range servingChannels {
+		price, ok := configured[strconv.Itoa(channelID)]
+		if !ok {
+			continue
+		}
+		prices = append(prices, price)
+	}
+	if len(prices) == 0 {
+		return nil
+	}
+	sort.Float64s(prices)
+	return prices
 }
 
 // GetSupportedEndpointMap 返回全局端点到路径的映射

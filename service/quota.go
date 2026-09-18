@@ -14,6 +14,7 @@ import (
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/setting/channel_pricing_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -106,6 +107,14 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 	audioOutTokens := usage.OutputTokenDetails.AudioTokens
 	groupRatio := ratio_setting.GetGroupRatio(relayInfo.UsingGroup)
 	modelRatio, _, _ := ratio_setting.GetModelRatio(modelName)
+
+	// Handicraft: the realtime websocket path re-reads the ratio instead of
+	// reusing PriceData, so it has to apply the served channel's own price here
+	// too, or realtime requests would bill at the model price while every other
+	// request bills at the channel price.
+	if price, ok := channel_pricing_setting.GetChannelModelPrice(modelName, relayInfo.GetChannelID()); ok {
+		modelRatio = channel_pricing_setting.ModelRatioForPrice(price)
+	}
 
 	autoGroup, exists := common.GetContextKey(ctx, constant.ContextKeyAutoGroup)
 	if exists {

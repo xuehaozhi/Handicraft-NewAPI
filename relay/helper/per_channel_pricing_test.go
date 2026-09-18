@@ -38,12 +38,19 @@ colon, because "@key:value" is a reasoning modifier that gets stripped.
 package helper
 
 import (
+	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	kitreasoning "github.com/QuantumNous/new-api/relaykit/relayconvert/reasoning"
+	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	hostreasoning "github.com/QuantumNous/new-api/setting/reasoning"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	hosttypes "github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -131,4 +138,180 @@ func TestUnpricedPerChannelAliasDoesNotInheritTheBaseRatio(t *testing.T) {
 	// resolveBillingModelName still returns the alias, not the base name, so
 	// billing looks it up here and misses rather than falling back.
 	assert.Equal(t, perChannelAliasA, resolveBillingModelName(perChannelAliasA))
+}
+
+// withChannelPrices installs the per-channel price table for one test and
+// restores the previous one afterwards.
+func withChannelPrices(t *testing.T, tableJSON string) {
+	t.Helper()
+
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		saved[key] = value
+		return nil
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, config.GlobalConfig.LoadFromDB(saved))
+	})
+
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"channel_pricing_setting.channel_model_price": tableJSON,
+	}))
+}
+
+func pricedRelayInfo(model string, channelID int) *relaycommon.RelayInfo {
+	info := &relaycommon.RelayInfo{
+		OriginModelName: model,
+		UserGroup:       "default",
+		UsingGroup:      "default",
+	}
+	info.ChannelMeta = &relaycommon.ChannelMeta{ChannelId: channelID}
+	return info
+}
+
+func priceDataFor(t *testing.T, info *relaycommon.RelayInfo) hosttypes.PriceData {
+	t.Helper()
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set("group", "default")
+	priceData, err := ModelPriceHelper(ctx, info, 1000, &types.TokenCountMeta{})
+	require.NoError(t, err)
+	return priceData
+}
+
+// The request is priced before it is routed, so the estimate cannot know which
+// channel will serve it. Per-channel prices must therefore leave the estimate
+// alone; they are applied later, by ApplyChannelPrice.
+func TestModelPriceHelperEstimateIgnoresChannelPrices(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withModelRatios(t, `{"`+perChannelBase+`":1}`)
+	withChannelPrices(t, `{"`+perChannelBase+`":{"7":5}}`)
+
+	priceData := priceDataFor(t, pricedRelayInfo(perChannelBase, 7))
+
+	assert.Equal(t, 1.0, priceData.ModelRatio, "the estimate stays channel-agnostic")
+}
+
+// The price the routed channel charges is what the user pays, even when the
+// model also has a global ratio.
+func TestChannelPriceOverridesTheModelRatio(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withModelRatios(t, `{"`+perChannelBase+`":1}`)
+	withChannelPrices(t, `{"`+perChannelBase+`":{"7":5}}`)
+
+	info := pricedRelayInfo(perChannelBase, 7)
+	priceDataFor(t, info)
+	ApplyChannelPrice(info, 7)
+
+	// Quoted per 1M tokens, and a ratio of R costs 2R USD per 1M tokens.
+	assert.Equal(t, 2.5, info.PriceData.ModelRatio)
+}
+
+func TestChannelPriceDoesNotLeakToOtherChannels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withModelRatios(t, `{"`+perChannelBase+`":1}`)
+	withChannelPrices(t, `{"`+perChannelBase+`":{"7":5}}`)
+
+	info := pricedRelayInfo(perChannelBase, 8)
+	priceDataFor(t, info)
+	ApplyChannelPrice(info, 8)
+
+	assert.Equal(t, 1.0, info.PriceData.ModelRatio, "an unpriced channel keeps the model ratio")
+}
+
+// Retries re-select a channel and re-apply its price, so the charge follows the
+// channel that actually served the request rather than the first one tried.
+func TestApplyChannelPriceFollowsTheRetriedChannel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withModelRatios(t, `{"`+perChannelBase+`":1}`)
+	withChannelPrices(t, `{"`+perChannelBase+`":{"7":5,"8":9}}`)
+
+	info := pricedRelayInfo(perChannelBase, 7)
+	priceDataFor(t, info)
+	ApplyChannelPrice(info, 7)
+	require.Equal(t, 2.5, info.PriceData.ModelRatio)
+
+	ApplyChannelPrice(info, 8)
+
+	assert.Equal(t, 4.5, info.PriceData.ModelRatio, "the retried channel's price takes over")
+}
+
+// Per-channel prices are quoted per 1M tokens, so they say nothing about a model
+// billed a fixed amount per request. Such a model must keep its fixed price.
+func TestChannelPriceIsIgnoredForRequestPricedModels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withModelRatios(t, `{}`)
+	withChannelPrices(t, `{"`+perChannelBase+`":{"7":5}}`)
+
+	savedPrice := ratio_setting.GetModelPriceCopy()
+	t.Cleanup(func() {
+		if payload, err := common.Marshal(savedPrice); err == nil {
+			_ = ratio_setting.UpdateModelPriceByJSONString(string(payload))
+		}
+	})
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"`+perChannelBase+`":0.02}`))
+
+	info := pricedRelayInfo(perChannelBase, 7)
+	priceDataFor(t, info)
+	ApplyChannelPrice(info, 7)
+
+	assert.True(t, info.PriceData.UsePrice, "a fixed-price model stays on fixed pricing")
+	assert.Equal(t, 0.02, info.PriceData.ModelPrice)
+	assert.Zero(t, info.PriceData.ModelRatio, "the token price must not become a ratio")
+}
+
+// Without a configured price nothing changes, on either path.
+func TestModelPriceHelperWithoutChannelPricesIsUnchanged(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withModelRatios(t, `{"`+perChannelBase+`":1.25}`)
+	withChannelPrices(t, `{}`)
+
+	info := pricedRelayInfo(perChannelBase, 7)
+	priceDataFor(t, info)
+	ApplyChannelPrice(info, 7)
+
+	assert.Equal(t, 1.25, info.PriceData.ModelRatio)
+}
+
+// The lookup accepts the name the request used, because the administrator
+// configures the price under the model name clients ask for.
+func TestChannelPriceIsFoundUnderTheRequestedModelName(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withModelRatios(t, `{"`+perChannelBase+`":1,"`+perChannelAliasA+`":1}`)
+	withChannelPrices(t, `{"`+perChannelAliasA+`":{"7":5}}`)
+
+	info := pricedRelayInfo(perChannelAliasA, 7)
+	priceDataFor(t, info)
+	ApplyChannelPrice(info, 7)
+
+	assert.Equal(t, 2.5, info.PriceData.ModelRatio)
+}
+
+// Per-channel prices refine a charge; they do not stand in for a missing model
+// price, which has to exist before routing can even happen.
+func TestModelWithoutAnyPriceIsStillRejectedBeforeRouting(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withModelRatios(t, `{}`)
+	withChannelPrices(t, `{"`+perChannelBase+`":{"7":5}}`)
+
+	oldSelfUse := operation_setting.SelfUseModeEnabled
+	operation_setting.SelfUseModeEnabled = false
+	t.Cleanup(func() { operation_setting.SelfUseModeEnabled = oldSelfUse })
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set("group", "default")
+	_, err := ModelPriceHelper(ctx, pricedRelayInfo(perChannelBase, 7), 1000, &types.TokenCountMeta{})
+	require.Error(t, err)
+}
+
+func TestApplyChannelPriceWithoutAChannelDoesNothing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withModelRatios(t, `{"`+perChannelBase+`":1}`)
+	withChannelPrices(t, `{"`+perChannelBase+`":{"7":5}}`)
+
+	info := pricedRelayInfo(perChannelBase, 0)
+	priceDataFor(t, info)
+	ApplyChannelPrice(info, 0)
+
+	assert.Equal(t, 1.0, info.PriceData.ModelRatio)
 }

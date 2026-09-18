@@ -201,6 +201,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			newAPIError = channelErr
 			break
 		}
+		// Handicraft: the channel is known now, so a price it sets for this model
+		// replaces the model-wide ratio the estimate was built from. This sits
+		// outside getChannel because that function returns early when the
+		// distributor already picked a channel, and that is the common path.
+		// Applying it on every attempt is what makes a retry charge the channel
+		// that actually served the request.
+		helper.ApplyChannelPrice(relayInfo, channel.Id)
 		addUsedChannel(c, channel.Id)
 		if billingErr := service.PrepareTieredBillingForSelectedGroup(c, relayInfo); billingErr != nil {
 			newAPIError = billingErr

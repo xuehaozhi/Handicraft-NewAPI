@@ -138,6 +138,21 @@ func GetChannel(
 		abilities = lo.Filter(abilities, func(ability Ability, _ int) bool {
 			return ability.Priority == nil && targetPriority == 0 || ability.Priority != nil && *ability.Priority == targetPriority
 		})
+
+		// Handicraft: inside this priority tier, prefer the cheapest upstream, so
+		// that a model served by several differently-priced channels is served by
+		// the cheap one. This is the path that runs unless MEMORY_CACHE_ENABLED is
+		// set, and it must apply the same rule as the in-memory one.
+		candidateIDs := make([]int, 0, len(abilities))
+		for _, ability := range abilities {
+			candidateIDs = append(candidateIDs, ability.ChannelId)
+		}
+		if keep := cheapestChannelIDs(model, candidateIDs); keep != nil {
+			abilities = lo.Filter(abilities, func(ability Ability, _ int) bool {
+				_, ok := keep[ability.ChannelId]
+				return ok
+			})
+		}
 	}
 	channel := Channel{}
 	if len(abilities) > 0 {

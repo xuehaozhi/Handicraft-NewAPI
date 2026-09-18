@@ -107,3 +107,16 @@ func GetAllChannelModelPrices() map[string]map[string]float64 {
 func HasAnyChannelPrice() bool {
 	return len(channelPricingSetting.ChannelModelPrice) > 0
 }
+
+// ModelRatioForPrice converts a stored per-channel price into the model ratio
+// billing works in.
+//
+// A ratio of R charges R quota per token, and quota is common.QuotaPerUnit (500k)
+// per USD, so 1M tokens cost 2R USD. Inverting that gives R = price / 2.
+//
+// It lives next to the stored price rather than at either call site so the two
+// billing paths that need it — the normal relay and the realtime websocket
+// pre-consume — cannot drift apart.
+func ModelRatioForPrice(price float64) float64 {
+	return price / 2
+}

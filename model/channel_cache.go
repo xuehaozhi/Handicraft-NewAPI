@@ -3,8 +3,10 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/setting/channel_pricing_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
@@ -168,12 +171,10 @@ func GetRandomSatisfiedChannel(
 	targetPriority := int64(sortedUniquePriorities[retry])
 
 	// get the priority for the given retry number
-	var sumWeight = 0
 	var targetChannels []*Channel
 	for _, channelId := range channels {
 		if channel, ok := channelsIDM[channelId]; ok {
 			if channel.GetPriority() == targetPriority {
-				sumWeight += channel.GetWeight()
 				targetChannels = append(targetChannels, channel)
 			}
 		} else {
@@ -183,6 +184,18 @@ func GetRandomSatisfiedChannel(
 
 	if len(targetChannels) == 0 {
 		return nil, errors.New(fmt.Sprintf("no channel found, group: %s, model: %s, priority: %d", group, model, targetPriority))
+	}
+
+	// Handicraft: inside this priority tier, prefer the cheapest upstream.
+	// Priority stays authoritative — it selected this tier — so an operator
+	// still pins a channel by raising its priority, and gets "try the cheap
+	// one first, fall back to the expensive one on retry" by giving them
+	// different priorities.
+	targetChannels = priceAwareCandidates(model, targetChannels)
+
+	var sumWeight = 0
+	for _, channel := range targetChannels {
+		sumWeight += channel.GetWeight()
 	}
 
 	// smoothing factor and adjustment
@@ -214,6 +227,92 @@ func GetRandomSatisfiedChannel(
 	}
 	// return null if no channel is not found
 	return nil, errors.New("channel not found")
+}
+
+// priceAwareCandidates narrows same-priority candidates to those on the cheapest
+// price tier. See cheapestChannelIDs for the rule.
+func priceAwareCandidates(model string, candidates []*Channel) []*Channel {
+	ids := make([]int, len(candidates))
+	for i, channel := range candidates {
+		ids[i] = channel.Id
+	}
+	keep := cheapestChannelIDs(model, ids)
+	if keep == nil {
+		return candidates
+	}
+
+	preferred := make([]*Channel, 0, len(candidates))
+	for _, channel := range candidates {
+		if _, ok := keep[channel.Id]; ok {
+			preferred = append(preferred, channel)
+		}
+	}
+	return preferred
+}
+
+// cheapestChannelIDs returns the candidate channel IDs that share the cheapest
+// price for a model, or nil when price should not influence the choice at all.
+//
+// Handicraft: two channels can serve the same model at different prices, and the
+// operator wants the cheap one used. Callers apply this only after narrowing to a
+// single priority tier, so priority stays authoritative — an operator still pins
+// a channel by raising its priority — and this merely breaks the tie inside that
+// tier, by price rather than by weight.
+//
+// A channel with no price of its own competes on the model's global price, which
+// is what it would actually be billed at, so pricing one channel cheap is enough
+// to make it win.
+//
+// Returns nil, meaning "no opinion", whenever per-channel pricing is not in play:
+// no prices configured, a single candidate, or a model billed per request, where
+// a per-1M-token price has nothing to compare against. Deployments that do not
+// use the feature therefore keep the previous selection behaviour exactly.
+//
+// Both selection paths need this: the in-memory one, and the database one, which
+// is what runs when MEMORY_CACHE_ENABLED is off — the default.
+func cheapestChannelIDs(model string, channelIDs []int) map[int]struct{} {
+	if len(channelIDs) < 2 || !channel_pricing_setting.HasAnyChannelPrice() {
+		return nil
+	}
+	if _, fixedPrice := ratio_setting.GetModelPrice(model, false); fixedPrice {
+		return nil
+	}
+
+	// Abilities may carry the model under its canonical name while the request
+	// used a variant, so accept either spelling.
+	configured := channel_pricing_setting.GetModelChannelPrices(model)
+	if len(configured) == 0 {
+		configured = channel_pricing_setting.GetModelChannelPrices(ratio_setting.RoutingMatchModelName(model))
+	}
+	if len(configured) == 0 {
+		return nil
+	}
+
+	// GetModelRatio falls back to the default ratio for an unpriced model, which
+	// is exactly what an unpriced channel would be billed at.
+	modelRatio, _, _ := ratio_setting.GetModelRatio(model)
+	fallbackPrice := modelRatio * 2
+
+	cheapest := math.Inf(1)
+	prices := make(map[int]float64, len(channelIDs))
+	for _, channelID := range channelIDs {
+		price := fallbackPrice
+		if own, ok := configured[strconv.Itoa(channelID)]; ok {
+			price = own
+		}
+		prices[channelID] = price
+		if price < cheapest {
+			cheapest = price
+		}
+	}
+
+	keep := make(map[int]struct{}, len(channelIDs))
+	for channelID, price := range prices {
+		if price == cheapest {
+			keep[channelID] = struct{}{}
+		}
+	}
+	return keep
 }
 
 func CacheGetChannel(id int) (*Channel, error) {
