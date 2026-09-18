@@ -444,6 +444,8 @@ docker volume ls | grep handicraft
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
 | `docker compose up` 报 `REDIS_PASSWORD must be set` | `.env` 不存在或该项为空 | 按第三节填写 `.env` |
+| `Cannot connect to the Docker daemon at unix:///var/run/docker.sock` | **Docker 服务没在运行**（多半是装完没启动） | `sudo systemctl start docker && sudo systemctl enable docker`，然后 `docker info` 确认；起不来看 `sudo journalctl -u docker -n 50 --no-pager` |
+| `the attribute 'version' is obsolete` | Compose v2 的无害警告 | 已在本仓库的 compose 文件里移除该属性；如果你改过文件，删掉 `version:` 那一行即可 |
 | new-api 容器反复重启 | Redis 未就绪或密码不匹配 | `docker compose logs redis`，核对 `.env` 密码 |
 | 日志出现 `Redis ping test failed` | Redis 密码与 `REDIS_CONN_STRING` 不一致 | 两处都取自 `${REDIS_PASSWORD}`，确认 `.env` 已生效 |
 | 容器被 Killed（退出码 137） | **内存不足被 OOM Killer 杀掉** | 按 1.2 节配置 swap；或改用更小内存占用 |

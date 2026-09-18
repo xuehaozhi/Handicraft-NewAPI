@@ -19,8 +19,10 @@
 #   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 #
 # Using MySQL instead of PostgreSQL: see the comments on the SQL_DSN lines.
-
-version: '3.4' # For compatibility with older Docker versions
+#
+# No top-level `version:` key. Compose v2 ignores it and warns that it is
+# obsolete, and this file already needs v2 for `depends_on.condition` and
+# `profiles`, so the key only ever produced noise.
 
 services:
   new-api:
