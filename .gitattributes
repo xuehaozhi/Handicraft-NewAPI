@@ -28,6 +28,10 @@
 # Shell scripts
 *.sh text eol=lf
 
+# Reverse-proxy samples. These get copied verbatim onto a Linux host, so a CRLF
+# checkout would ship a config written for the wrong platform.
+deploy/** text eol=lf
+
 # Binary files
 *.png binary
 *.jpg binary

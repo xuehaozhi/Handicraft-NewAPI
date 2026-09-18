@@ -20,9 +20,10 @@ on:
     branches:
       - custom/rc33
     # Changes that cannot alter the image do not deserve a 20-minute build.
-    # The compose files, .env template and docs are deployment-side only, and
-    # test files are never compiled into the binary; the image comes solely from
-    # the Dockerfile and the non-test source it copies.
+    # The compose files, .env template, reverse-proxy samples and docs are
+    # deployment-side only, and test files are never compiled into the binary;
+    # the image comes solely from the Dockerfile and the non-test source it
+    # copies.
     paths-ignore:
       - '**.md'
       - 'LICENSE'
@@ -30,6 +31,7 @@ on:
       - 'docker-compose*.yml'
       - '.dockerignore'
       - '.env.example'
+      - 'deploy/**'
       - '**/*_test.go'
       - '**/*.test.ts'
       - '**/*.test.tsx'

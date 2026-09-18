@@ -364,6 +364,9 @@ sudo ufw allow 3000/tcp
 **注意**：只有 3000 端口需要对外开放。Redis（以及启用 profile 时的 Postgres）的端口在
 compose 中是注释掉的，只在 Docker 内网可达，**不要取消注释**。
 
+> 配好反向代理之后（第十一节），只需要开放 **80 和 443**，并且应该把 3000 关掉：
+> `sudo ufw delete allow 3000/tcp`。
+
 ---
 
 ## 九、日常运维
@@ -448,6 +451,10 @@ docker volume ls | grep handicraft
 | 所有 API 返回 503 `no available channel` | 未添加上游渠道 | 后台「渠道」中添加 |
 | Redis 内存写满报错 | 达到 `REDIS_MAXMEMORY`（默认 64 MB） | 先确认机器还有空闲内存，再调高该值 |
 | `docker compose ps` 里没有 postgres | **正常**，默认用 SQLite | 见 4.4 节 |
+| 反代后 502 Bad Gateway | Nginx 连不到容器 | `curl -I http://127.0.0.1:3000/api/status`；通了就是 Nginx 配置问题，不通看容器日志 |
+| 反代后**流式输出不出字**，最后一次性蹦出来 | Nginx 缓冲了上游响应 | 确认配置里有 `proxy_buffering off`（见 11.1） |
+| 长回答跑到一半被截断 | `proxy_read_timeout` 太短 | 设成 `3600s`（见 11.1） |
+| 反代后**能打开但一操作就掉登录** | 没设 `SESSION_COOKIE_SECURE` / `SESSION_COOKIE_TRUSTED_URL` | 见 11.1，设完要 `docker compose up -d` 而不是 `restart` |
 
 ### 关于退出码 137 / OOM
 
@@ -493,6 +500,90 @@ SQLite 默认已启用 WAL 模式与 30 秒 busy timeout，单机中小流量足
 2. **保持 2FA 开启**，定期轮换 API Key
 3. **不要提交 `.env`**（已在 `.gitignore` 中）
 4. 定期更新基础镜像，修补 Redis 漏洞
+
+### 11.1 用 Nginx 反代到域名
+
+仓库里已经放了一份可直接用的配置：`deploy/nginx-api.conf`。把里面的域名换成你自己的即可。
+
+**按下面的顺序做，顺序反了会卡在证书不存在上。**
+
+**第一步：DNS。** 给域名加一条 A 记录指向服务器公网 IP，等到能解析出来：
+
+```bash
+dig +short api.example.com      # 应输出你的服务器 IP
+```
+
+**第二步：先签证书。** 这一步 Nginx 还没接管这个站点，所以用 standalone 模式（期间需要占用
+80 端口，先停一下 Nginx）：
+
+```bash
+sudo apt install -y certbot
+sudo systemctl stop nginx
+sudo certbot certonly --standalone -d api.example.com
+sudo systemctl start nginx
+```
+
+**第三步：再启用站点。**
+
+```bash
+sudo cp deploy/nginx-api.conf /etc/nginx/sites-available/api.example.com
+sudo ln -s /etc/nginx/sites-available/api.example.com /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+```
+
+> 到这一步 `nginx -t` 才可能通过。如果**先**启用站点再去签证书，`nginx -t` 会因为
+> `ssl_certificate ... No such file or directory` 直接失败——那不是在报配置写错了，
+> 只是证书还没生成。
+
+续期是自动的（certbot 的 systemd timer），可以验证一下：
+
+```bash
+sudo certbot renew --dry-run
+```
+
+#### 三个必须注意的地方
+
+**① 必须关掉 Nginx 的响应缓冲。** 这是 LLM 网关最容易踩的坑：Nginx 默认会缓冲上游响应，
+流式输出会被攒在缓冲区里，客户端界面上什么都不显示，直到整段答案生成完才一次性蹦出来。
+配置里已经写了 `proxy_buffering off`，**不要删**。
+
+**② 超时要放大。** 默认 `proxy_read_timeout` 是 60 秒，长回答会在跑到一半时被切断，而且
+客户端拿到的是**截断的答案**而不是报错，很难排查。配置里设成了 3600 秒。
+
+**③ 反代通了之后，改这两个设置。** 应用启动时会打印一条警告说 refresh cookie 不是 Secure、
+Origin 校验被关掉了——那是因为它还在按明文 HTTP 的模式跑。在 `.env` 里加上：
+
+```ini
+SESSION_COOKIE_SECURE=true
+SESSION_COOKIE_TRUSTED_URL=https://api.example.com
+```
+
+然后重建容器：
+
+```bash
+docker compose up -d
+```
+
+`SESSION_COOKIE_TRUSTED_URL` 填**精确的 origin**：带 `https://`、不带路径、不支持通配符，
+多个用英文逗号分隔。它是 refresh / logout 的 origin 白名单，不是 relay 的 CORS 白名单。
+
+#### 确认反代没问题后，关掉 3000 端口的公网暴露
+
+```ini
+# .env
+BIND_ADDR=127.0.0.1
+```
+
+```bash
+docker compose up -d
+sudo ufw delete allow 3000/tcp
+```
+
+改完之后唯一的入口就是 Nginx。**顺序不要反**——先确认 `https://你的域名` 能正常打开，
+再去关 3000，否则会把自己锁在外面。
 
 ---
 
