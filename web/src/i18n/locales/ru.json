@@ -3712,7 +3712,7 @@
     "Price for {{channel}} must be a non-negative number.": "Цена для {{channel}} должна быть неотрицательным числом.",
     "Price ID": "ID цены",
     "Price mode (USD per 1M tokens)": "Режим ценообразования (USD за 1 млн токенов)",
-    "Price per 1M tokens on each channel. Leave a field empty to fall back to the model price. The cheapest channel is preferred when routing.": "Цена за 1 млн токенов для каждого канала. Оставьте поле пустым, чтобы использовать цену модели. При маршрутизации предпочитается самый дешёвый канал.",
+    "Price per 1M tokens on each channel. Leave a field empty so that channel falls back to the model price.": "Цена за 1 млн токенов для каждого канала. Оставьте поле пустым, чтобы этот канал использовал цену модели.",
     "Price summary": "Сводка цен",
     "price_xxx": "price_xxx",
     "Price:": "Цена:",

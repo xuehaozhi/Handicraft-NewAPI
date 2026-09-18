@@ -3712,7 +3712,7 @@
     "Price for {{channel}} must be a non-negative number.": "Le prix de {{channel}} doit être un nombre positif ou nul.",
     "Price ID": "ID du prix",
     "Price mode (USD per 1M tokens)": "Mode de tarification (USD par 1M de jetons)",
-    "Price per 1M tokens on each channel. Leave a field empty to fall back to the model price. The cheapest channel is preferred when routing.": "Prix par million de tokens pour chaque canal. Laissez un champ vide pour retomber sur le prix du modèle. Le canal le moins cher est privilégié lors du routage.",
+    "Price per 1M tokens on each channel. Leave a field empty so that channel falls back to the model price.": "Prix par million de tokens pour chaque canal. Laissez un champ vide pour que ce canal retombe sur le prix du modèle.",
     "Price summary": "Résumé des prix",
     "price_xxx": "price_xxx",
     "Price:": "Prix :",

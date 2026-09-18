@@ -3712,7 +3712,7 @@
     "Price for {{channel}} must be a non-negative number.": "{{channel}} 的價格必須是非負數。",
     "Price ID": "價格 ID",
     "Price mode (USD per 1M tokens)": "價格模式（每 100 萬個 token 的美元價格）",
-    "Price per 1M tokens on each channel. Leave a field empty to fall back to the model price. The cheapest channel is preferred when routing.": "每個通路每百萬 token 的價格。留空則回退到模型價格。選渠時優先使用最便宜的通路。",
+    "Price per 1M tokens on each channel. Leave a field empty so that channel falls back to the model price.": "每個通路每百萬 token 的價格。留空則該通路回退到模型價格。",
     "Price summary": "價格摘要",
     "price_xxx": "price_xxx",
     "Price:": "價格：",

@@ -160,7 +160,7 @@ export function ModelChannelPrices(props: ModelChannelPricesProps) {
         <p className='text-sm font-medium'>{props.modelName}</p>
         <p className='text-muted-foreground text-xs'>
           {t(
-            'Price per 1M tokens on each channel. Leave a field empty to fall back to the model price. The cheapest channel is preferred when routing.'
+            'Price per 1M tokens on each channel. Leave a field empty so that channel falls back to the model price.'
           )}
         </p>
       </div>

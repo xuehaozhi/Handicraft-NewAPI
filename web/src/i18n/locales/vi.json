@@ -3712,7 +3712,7 @@
     "Price for {{channel}} must be a non-negative number.": "Giá của {{channel}} phải là số không âm.",
     "Price ID": "Mã giá",
     "Price mode (USD per 1M tokens)": "Chế độ giá (USD mỗi 1 triệu token)",
-    "Price per 1M tokens on each channel. Leave a field empty to fall back to the model price. The cheapest channel is preferred when routing.": "Giá trên mỗi 1 triệu token cho từng kênh. Để trống để dùng giá của model. Kênh rẻ nhất được ưu tiên khi định tuyến.",
+    "Price per 1M tokens on each channel. Leave a field empty so that channel falls back to the model price.": "Giá trên mỗi 1 triệu token cho từng kênh. Để trống để kênh đó dùng giá của model.",
     "Price summary": "Tóm tắt giá",
     "price_xxx": "price_xxx",
     "Price:": "Giá:",
