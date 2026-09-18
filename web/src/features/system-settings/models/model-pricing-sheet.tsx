@@ -87,6 +87,7 @@ import {
 } from './model-pricing-core'
 import { PriceInput, PriceLane } from './model-pricing-inputs'
 import { formatPricingNumber } from './pricing-format'
+import { ModelChannelPrices } from './model-channel-prices'
 import { TaskUsagePricingEditor } from './task-usage-pricing-editor'
 import { TieredPricingEditor } from './tiered-pricing-editor'
 
@@ -752,6 +753,20 @@ export const ModelPricingEditorPanel = forwardRef<
                     </FieldGroup>
                   </TabsContent>
                 </Tabs>
+
+                {/* Handicraft: per-channel prices. Deliberately outside the
+                    Tabs: the pricing-mode state machine and its save path only
+                    accept the three billing modes, so a fourth tab value would
+                    have to be threaded through both. Only meaningful for an
+                    existing model, since a new one has no channels yet. */}
+                {editData?.name && (
+                  <div className='space-y-3 rounded-lg border p-3'>
+                    <div className='text-sm font-medium'>
+                      {t('Per-channel pricing')}
+                    </div>
+                    <ModelChannelPrices modelName={editData.name} />
+                  </div>
+                )}
               </FieldGroup>
 
               <aside className='bg-muted/20 sticky top-0 rounded-lg border'>

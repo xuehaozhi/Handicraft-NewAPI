@@ -41,6 +41,34 @@ export async function updateSystemOption(request: UpdateOptionRequest) {
   return res.data
 }
 
+/**
+ * Handicraft: the model -> channels index plus the configured per-channel
+ * prices, backing the per-channel price editor. One request returns both so
+ * the editor does not have to join two sources.
+ */
+export type ModelChannelEntry = {
+  channel_id: number
+  channel_name: string
+  groups: string[]
+}
+
+export type ModelChannelsData = {
+  model_channels: Record<string, ModelChannelEntry[]>
+  /** model -> channel ID (as a string) -> price per 1M tokens */
+  channel_prices: Record<string, Record<string, number>>
+}
+
+export type ModelChannelsResponse = {
+  success: boolean
+  message?: string
+  data: ModelChannelsData
+}
+
+export async function getModelChannels() {
+  const res = await api.get<ModelChannelsResponse>('/api/channel/model_channels')
+  return res.data
+}
+
 export async function confirmPaymentCompliance() {
   const res = await api.post<ConfirmPaymentComplianceResponse>(
     '/api/option/payment_compliance',
