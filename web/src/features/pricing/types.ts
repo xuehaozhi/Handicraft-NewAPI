@@ -70,6 +70,14 @@ export type PricingModel = {
    * Handicraft addition (2026-09-11).
    */
   channel_count?: number
+  /**
+   * Per-channel prices configured for this model, in the same unit as the price
+   * shown beside the badge (per 1M tokens, before the group ratio), cheapest
+   * first. Absent unless an administrator configured at least one.
+   *
+   * Handicraft addition (2026-09-11).
+   */
+  channel_prices?: number[]
   tags?: string
   supported_endpoint_types?: string[]
   key?: string

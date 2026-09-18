@@ -764,7 +764,10 @@ export const ModelPricingEditorPanel = forwardRef<
                     <div className='text-sm font-medium'>
                       {t('Per-channel pricing')}
                     </div>
-                    <ModelChannelPrices modelName={editData.name} />
+                    <ModelChannelPrices
+                      modelName={editData.name}
+                      pricingMode={pricingMode}
+                    />
                   </div>
                 )}
               </FieldGroup>

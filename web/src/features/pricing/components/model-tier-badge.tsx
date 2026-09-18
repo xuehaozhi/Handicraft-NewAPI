@@ -26,17 +26,38 @@ the model square.
 Only rendered when more than one channel is available. A single channel is the
 unremarkable case, and a "1 tier" badge on most rows would be noise that
 dilutes the signal for the rows that actually have alternatives.
+
+Hovering the badge lists the per-channel prices, cheapest first, when an
+administrator configured any. Prices are passed in already formatted by the
+caller, which owns the token unit, group ratio and display currency — so the
+list always agrees with the price it sits next to.
+
+Prices only, never channel names: this renders on the public pricing page, and
+naming the upstreams a site resells would leak its supply chain.
 --------------------------------------------------------------------------
 */
 import { useTranslation } from 'react-i18next'
 
 import { StatusBadge } from '@/components/status-badge'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 import type { PricingModel } from '../types'
 
 interface ModelTierBadgeProps {
   model: PricingModel
   className?: string
+  /**
+   * Per-channel prices, already formatted in the display currency and token
+   * unit, cheapest first. Empty or omitted renders the badge without a tooltip.
+   */
+  prices?: string[]
+  /** Token unit the prices are quoted per, e.g. "1M". */
+  priceUnitLabel?: string
 }
 
 export function ModelTierBadge(props: ModelTierBadgeProps) {
@@ -52,8 +73,7 @@ export function ModelTierBadge(props: ModelTierBadgeProps) {
   // Deliberately not the i18next `count` variable: that would engage plural
   // resolution, and the badge only ever renders for two or more tiers.
   const label = t('🔰 · {{n}} tiers', { n: tierCount })
-
-  return (
+  const badge = (
     <StatusBadge
       label={label}
       variant='blue'
@@ -61,5 +81,38 @@ export function ModelTierBadge(props: ModelTierBadgeProps) {
       copyable={false}
       className={props.className}
     />
+  )
+
+  // Distinct prices only: two channels charging the same amount are one price as
+  // far as a buyer is concerned, and repeating the row would read as a glitch.
+  const prices = [...new Set(props.prices ?? [])]
+  if (prices.length === 0) {
+    return badge
+  }
+
+  return (
+    <TooltipProvider delay={100}>
+      <Tooltip>
+        <TooltipTrigger render={<span className='inline-flex' />}>
+          {badge}
+        </TooltipTrigger>
+        <TooltipContent
+          side='top'
+          className='border-border bg-popover text-popover-foreground flex-col items-start gap-1 p-2'
+        >
+          <span className='font-medium'>{t('Channel prices')}</span>
+          <ul className='flex flex-col gap-0.5'>
+            {prices.map((price) => (
+              <li key={price} className='flex items-center gap-1'>
+                <span className='font-mono tabular-nums'>{price}</span>
+                <span className='text-muted-foreground'>
+                  / {props.priceUnitLabel}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }

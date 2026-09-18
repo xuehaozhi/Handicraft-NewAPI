@@ -240,6 +240,43 @@ export function formatFixedPrice(
 }
 
 /**
+ * Format a model's per-channel prices for the tier badge tooltip.
+ *
+ * Handicraft: each stored price is per 1M tokens before the group ratio, which
+ * is exactly what the model price beside it is. Feeding it back through
+ * `formatPrice` as a synthetic model ratio therefore reproduces the same group
+ * ratio, recharge rate, currency and token unit as the number next to it, so the
+ * two can never disagree.
+ *
+ * Returns an empty array when the administrator configured no per-channel price,
+ * in which case the badge renders no tooltip at all.
+ */
+export function formatChannelPrices(
+  model: PricingModel,
+  tokenUnit: TokenUnit,
+  showWithRecharge = false,
+  priceRate = 1,
+  usdExchangeRate = 1,
+  selectedGroup?: string
+): string[] {
+  const prices = model.channel_prices
+  if (!prices || prices.length === 0) return []
+
+  // A ratio of R is 2R USD per 1M tokens, so a price of P is the ratio P / 2.
+  return prices.map((price) =>
+    formatPrice(
+      { ...model, quota_type: QUOTA_TYPE_VALUES.TOKEN, model_ratio: price / 2 },
+      'input',
+      tokenUnit,
+      showWithRecharge,
+      priceRate,
+      usdExchangeRate,
+      selectedGroup
+    )
+  )
+}
+
+/**
  * Format fixed price for pay-per-request models (minimum price from all groups)
  */
 export function formatRequestPrice(

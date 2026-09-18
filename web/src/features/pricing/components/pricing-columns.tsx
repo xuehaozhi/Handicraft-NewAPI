@@ -38,6 +38,7 @@ import {
 import { parseTags } from '../lib/filters'
 import { isTokenBasedModel } from '../lib/model-helpers'
 import {
+  formatChannelPrices,
   formatPrice,
   formatRequestPrice,
   stripTrailingZeros,
@@ -231,7 +232,19 @@ export function usePricingColumns(
               <div className='text-muted-foreground/50 text-[10px]'>
                 / {tokenUnitLabel} tokens
               </div>
-              <ModelTierBadge model={model} className='mt-0.5' />
+              <ModelTierBadge
+                model={model}
+                className='mt-0.5'
+                prices={formatChannelPrices(
+                  model,
+                  tokenUnit,
+                  showRechargePrice,
+                  priceRate,
+                  usdExchangeRate,
+                  selectedGroup
+                )}
+                priceUnitLabel={tokenUnitLabel}
+              />
             </div>
           )
         }
@@ -252,7 +265,19 @@ export function usePricingColumns(
             <div className='text-muted-foreground/50 text-[10px]'>
               / {t('request')}
             </div>
-            <ModelTierBadge model={model} className='mt-0.5' />
+            <ModelTierBadge
+              model={model}
+              className='mt-0.5'
+              prices={formatChannelPrices(
+                model,
+                tokenUnit,
+                showRechargePrice,
+                priceRate,
+                usdExchangeRate,
+                selectedGroup
+              )}
+              priceUnitLabel={tokenUnitLabel}
+            />
           </div>
         )
       },

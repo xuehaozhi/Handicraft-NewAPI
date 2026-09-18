@@ -47,12 +47,20 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 
 import { getModelChannels, updateSystemOption } from '../api'
+import type { PricingMode } from './model-pricing-core'
 
 /** Backend option key for the whole model -> channel -> price map. */
 const CHANNEL_PRICE_OPTION_KEY = 'channel_pricing_setting.channel_model_price'
 
 type ModelChannelPricesProps = {
   modelName: string
+  /**
+   * The billing mode currently selected for this model. A per-channel price is
+   * quoted per token, so it only means something when the model is billed that
+   * way; other modes ignore it and the editor says so rather than silently
+   * discarding what the administrator typed.
+   */
+  pricingMode: PricingMode
 }
 
 export function ModelChannelPrices(props: ModelChannelPricesProps) {
@@ -160,9 +168,16 @@ export function ModelChannelPrices(props: ModelChannelPricesProps) {
         <p className='text-sm font-medium'>{props.modelName}</p>
         <p className='text-muted-foreground text-xs'>
           {t(
-            'Price per 1M tokens on each channel. Leave a field empty so that channel falls back to the model price.'
+            'Price per 1M tokens on each channel. Leave a field empty so that channel falls back to the model price. The cheapest channel is preferred when routing.'
           )}
         </p>
+        {props.pricingMode !== 'per-token' && (
+          <p className='text-destructive text-xs'>
+            {t(
+              'Per-channel prices apply to models billed per token; this model is billed another way.'
+            )}
+          </p>
+        )}
       </div>
 
       <div className='divide-border rounded-lg border'>

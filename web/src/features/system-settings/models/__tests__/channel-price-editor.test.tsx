@@ -29,6 +29,7 @@ import { toast } from 'sonner'
 import { beforeAll, describe, expect, test, vi } from 'vitest'
 
 import { ModelChannelPrices } from '../model-channel-prices'
+import type { PricingMode } from '../model-pricing-core'
 
 const getModelChannels = vi.fn()
 const updateSystemOption = vi.fn()
@@ -59,14 +60,14 @@ const TWO_CHANNELS = {
   },
 }
 
-function renderEditor(modelName: string) {
+function renderEditor(modelName: string, pricingMode: PricingMode = 'per-token') {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
 
   render(
     <QueryClientProvider client={queryClient}>
-      <ModelChannelPrices modelName={modelName} />
+      <ModelChannelPrices modelName={modelName} pricingMode={pricingMode} />
     </QueryClientProvider>
   )
 
@@ -83,6 +84,8 @@ describe('per-channel price editor', () => {
       Inherit: 'Inherit',
       'Only one channel serves this model, so there is no per-channel price to set.':
         'Only one channel serves this model, so there is no per-channel price to set.',
+      'Per-channel prices apply to models billed per token; this model is billed another way.':
+        'Per-channel prices apply to models billed per token; this model is billed another way.',
       'Save channel prices': 'Save channel prices',
     })
   })
@@ -192,6 +195,36 @@ describe('per-channel price editor', () => {
       expect(toast.error).toHaveBeenCalled()
     })
     expect(updateSystemOption).not.toHaveBeenCalled()
+
+    queryClient.clear()
+  })
+
+  // A per-channel price is quoted per token, so it is dead weight on a model
+  // billed any other way. Saying so beats silently discarding what was typed.
+  test('warns when the model is not billed per token', async () => {
+    getModelChannels.mockResolvedValue(TWO_CHANNELS)
+    const queryClient = renderEditor('deepseek-v4.1-flash', 'tiered_expr')
+
+    expect(
+      await screen.findByText(
+        'Per-channel prices apply to models billed per token; this model is billed another way.'
+      )
+    ).toBeInTheDocument()
+
+    queryClient.clear()
+  })
+
+  test('stays quiet when the model is billed per token', async () => {
+    getModelChannels.mockResolvedValue(TWO_CHANNELS)
+    const queryClient = renderEditor('deepseek-v4.1-flash', 'per-token')
+
+    await screen.findByRole('textbox', { name: 'Cheap' })
+
+    expect(
+      screen.queryByText(
+        'Per-channel prices apply to models billed per token; this model is billed another way.'
+      )
+    ).not.toBeInTheDocument()
 
     queryClient.clear()
   })

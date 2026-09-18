@@ -35,7 +35,7 @@ import {
 import { getTaskNumberFields } from '../lib/task-expr'
 import { parseTags } from '../lib/filters'
 import { isTokenBasedModel } from '../lib/model-helpers'
-import { formatPrice, formatRequestPrice } from '../lib/price'
+import { formatChannelPrices, formatPrice, formatRequestPrice } from '../lib/price'
 import type { PricingModel, TokenUnit } from '../types'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelPerfBadge, type ModelPerfBadgeData } from './model-perf-badge'
@@ -267,7 +267,19 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
               {priceSummary}
               {/* Sits beside the price so the number of upstreams reads as part
                   of the pricing story. Renders nothing for a single channel. */}
-              <ModelTierBadge model={props.model} className='self-center' />
+              <ModelTierBadge
+                model={props.model}
+                className='self-center'
+                prices={formatChannelPrices(
+                  props.model,
+                  tokenUnit,
+                  showRechargePrice,
+                  priceRate,
+                  usdExchangeRate,
+                  props.selectedGroup
+                )}
+                priceUnitLabel={tokenUnitLabel}
+              />
             </div>
           </div>
         </div>
