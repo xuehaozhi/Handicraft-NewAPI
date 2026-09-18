@@ -37,12 +37,8 @@ import {
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
 import { isTokenBasedModel } from '../lib/model-helpers'
-import {
-  formatChannelPrices,
-  formatPrice,
-  formatRequestPrice,
-  stripTrailingZeros,
-} from '../lib/price'
+import { getPriceTiers } from '../lib/price-tiers'
+import { formatPrice, formatRequestPrice, stripTrailingZeros } from '../lib/price'
 import type { PricingModel, TokenUnit } from '../types'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelTierBadge } from './model-tier-badge'
@@ -72,6 +68,17 @@ export function usePricingColumns(
   } = options
 
   const tokenUnitLabel = tokenUnit === 'K' ? '1K' : '1M'
+
+  // Every column that shows a price needs the same tier list, and the options
+  // are identical for all of them, so build it once per render.
+  const tiersFor = (model: PricingModel) =>
+    getPriceTiers(model, {
+      tokenUnit,
+      showWithRecharge: showRechargePrice,
+      priceRate,
+      usdExchangeRate,
+      selectedGroup,
+    })
 
   return [
     // Model column
@@ -235,14 +242,7 @@ export function usePricingColumns(
               <ModelTierBadge
                 model={model}
                 className='mt-0.5'
-                prices={formatChannelPrices(
-                  model,
-                  tokenUnit,
-                  showRechargePrice,
-                  priceRate,
-                  usdExchangeRate,
-                  selectedGroup
-                )}
+                tiers={tiersFor(model)}
                 priceUnitLabel={tokenUnitLabel}
               />
             </div>
@@ -268,14 +268,7 @@ export function usePricingColumns(
             <ModelTierBadge
               model={model}
               className='mt-0.5'
-              prices={formatChannelPrices(
-                model,
-                tokenUnit,
-                showRechargePrice,
-                priceRate,
-                usdExchangeRate,
-                selectedGroup
-              )}
+              tiers={tiersFor(model)}
               priceUnitLabel={tokenUnitLabel}
             />
           </div>

@@ -35,7 +35,8 @@ import {
 import { getTaskNumberFields } from '../lib/task-expr'
 import { parseTags } from '../lib/filters'
 import { isTokenBasedModel } from '../lib/model-helpers'
-import { formatChannelPrices, formatPrice, formatRequestPrice } from '../lib/price'
+import { getPriceTiers } from '../lib/price-tiers'
+import { formatPrice, formatRequestPrice } from '../lib/price'
 import type { PricingModel, TokenUnit } from '../types'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelPerfBadge, type ModelPerfBadgeData } from './model-perf-badge'
@@ -265,19 +266,18 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
             </h3>
             <div className='mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm sm:mt-1 sm:gap-x-3'>
               {priceSummary}
-              {/* Sits beside the price so the number of upstreams reads as part
-                  of the pricing story. Renders nothing for a single channel. */}
+              {/* Sits beside the price so the number of price tiers reads as
+                  part of the pricing story. Renders nothing for a single one. */}
               <ModelTierBadge
                 model={props.model}
                 className='self-center'
-                prices={formatChannelPrices(
-                  props.model,
+                tiers={getPriceTiers(props.model, {
                   tokenUnit,
-                  showRechargePrice,
+                  showWithRecharge: showRechargePrice,
                   priceRate,
                   usdExchangeRate,
-                  props.selectedGroup
-                )}
+                  selectedGroup: props.selectedGroup,
+                })}
                 priceUnitLabel={tokenUnitLabel}
               />
             </div>

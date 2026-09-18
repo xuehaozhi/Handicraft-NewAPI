@@ -19,11 +19,15 @@ For commercial licensing, please contact support@quantumnous.com
 --------------------------------------------------------------------------
 Modifications for Handicraft — 2026-09-11
 
-New file added by Handicraft: regression tests for the model tier badge.
+New file added by Handicraft: regression tests for the price-tier badge and
+the tier panel behind it.
 
-The badge's contract is which counts are worth showing: anything above one
-channel gets a badge, and the single-channel case — by far the most common —
-must stay silent so the badge keeps meaning something.
+Two contracts are load-bearing here:
+
+  - the badge only appears when a model really is sold at more than one price,
+    so it keeps meaning something;
+  - a tier's price is produced by the same formatter as the row's own price, so
+    the panel can never quote a different number for the same tier.
 --------------------------------------------------------------------------
 */
 import { render, screen } from '@testing-library/react'
@@ -31,7 +35,8 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, test } from 'vitest'
 
 import { ModelTierBadge } from '../components/model-tier-badge'
-import { formatChannelPrices, formatPrice } from '../lib/price'
+import { getPriceTiers } from '../lib/price-tiers'
+import { formatPrice } from '../lib/price'
 import type { PricingModel } from '../types'
 
 function makeModel(overrides?: Partial<PricingModel>): PricingModel {
@@ -46,136 +51,188 @@ function makeModel(overrides?: Partial<PricingModel>): PricingModel {
   }
 }
 
-describe('ModelTierBadge', () => {
-  test('given a single channel, no badge is rendered', () => {
-    const { container } = render(<ModelTierBadge model={makeModel({ channel_count: 1 })} />)
+const THREE_GROUPS = makeModel({
+  enable_groups: ['vip', 'default', 'free'],
+  group_ratio: { free: 0, default: 1, vip: 3 },
+})
 
-    expect(container).toBeEmptyDOMElement()
+describe('getPriceTiers', () => {
+  test('a model sold in one group at one price has no tiers', () => {
+    expect(getPriceTiers(makeModel(), { tokenUnit: 'M' })).toEqual({
+      source: 'none',
+      tiers: [],
+    })
   })
 
-  test('given zero channels, no badge is rendered', () => {
-    const { container } = render(<ModelTierBadge model={makeModel({ channel_count: 0 })} />)
+  test('a model sold to several groups gets one tier per distinct ratio, cheapest first', () => {
+    const { source, tiers } = getPriceTiers(THREE_GROUPS, { tokenUnit: 'M' })
 
-    expect(container).toBeEmptyDOMElement()
+    expect(source).toBe('group')
+    expect(tiers.map((tier) => tier.label)).toEqual(['free', 'default', 'vip'])
   })
 
-  test('given the backend omits the count, no badge is rendered', () => {
-    const { container } = render(<ModelTierBadge model={makeModel()} />)
+  // Two groups charged the same are one price to a buyer; two identical rows
+  // would read as a rendering glitch.
+  test('groups sharing a ratio collapse into one tier', () => {
+    const model = makeModel({
+      enable_groups: ['a', 'b'],
+      group_ratio: { a: 2, b: 2 },
+    })
 
-    expect(container).toBeEmptyDOMElement()
+    expect(getPriceTiers(model, { tokenUnit: 'M' }).tiers).toEqual([])
   })
 
-  test('given two channels, the badge reports two tiers', () => {
-    render(<ModelTierBadge model={makeModel({ channel_count: 2 })} />)
+  test('a tier is priced exactly as the row prices it', () => {
+    const { tiers } = getPriceTiers(THREE_GROUPS, { tokenUnit: 'M' })
 
-    expect(screen.getByText('🔰 · 2 tiers')).toBeInTheDocument()
-  })
-
-  test('given more than two channels, the badge reports the exact count', () => {
-    render(<ModelTierBadge model={makeModel({ channel_count: 5 })} />)
-
-    expect(screen.getByText('🔰 · 5 tiers')).toBeInTheDocument()
-    expect(screen.queryByText('🔰 · 2 tiers')).toBeNull()
-  })
-
-  test('given a badge, it stays inert so it cannot be mistaken for a copyable field', () => {
-    render(<ModelTierBadge model={makeModel({ channel_count: 3 })} />)
-
-    const badge = screen.getByText('🔰 · 3 tiers')
-    // A copyable StatusBadge would advertise itself through its title.
-    expect(badge.closest('[title]')?.getAttribute('title')).not.toMatch(/copy/i)
-  })
-
-  test('given no configured channel prices, hovering shows nothing extra', async () => {
-    const user = userEvent.setup()
-    render(<ModelTierBadge model={makeModel({ channel_count: 2 })} />)
-
-    await user.hover(screen.getByText('🔰 · 2 tiers'))
-
-    expect(screen.queryByText('Channel prices')).toBeNull()
-  })
-
-  test('given configured channel prices, hovering lists them cheapest first', async () => {
-    const user = userEvent.setup()
-    render(
-      <ModelTierBadge
-        model={makeModel({ channel_count: 2 })}
-        prices={['¥1.50', '¥3.50']}
-        priceUnitLabel='1M'
-      />
+    const vip = tiers.find((tier) => tier.label === 'vip')
+    expect(vip?.input).toBe(
+      formatPrice(THREE_GROUPS, 'input', 'M', false, 1, 1, 'vip')
     )
-
-    await user.hover(screen.getByText('🔰 · 2 tiers'))
-
-    expect(await screen.findByText('Channel prices')).toBeInTheDocument()
-    const rows = screen.getAllByRole('listitem')
-    expect(rows.map((row) => row.textContent)).toEqual([
-      '¥1.50/ 1M',
-      '¥3.50/ 1M',
-    ])
+    expect(vip?.output).toBe(
+      formatPrice(THREE_GROUPS, 'output', 'M', false, 1, 1, 'vip')
+    )
   })
 
-  // Two channels charging the same amount are one price to a buyer; repeating
-  // the row would read as a rendering glitch.
-  test('given two channels at the same price, hovering lists it once', async () => {
-    const user = userEvent.setup()
-    render(
-      <ModelTierBadge
-        model={makeModel({ channel_count: 2 })}
-        prices={['¥1.50', '¥1.50']}
-        priceUnitLabel='1M'
-      />
+  // With a single group there is no group dimension, so the per-channel prices
+  // the operator configured are the only tiers there are.
+  test('a single-group model falls back to its configured channel prices', () => {
+    const model = makeModel({ channel_prices: [3.5, 1.5] })
+
+    const { source, tiers } = getPriceTiers(model, { tokenUnit: 'M' })
+
+    expect(source).toBe('channel')
+    expect(tiers).toHaveLength(2)
+    // A per-channel price is quoted per 1M input tokens, so a price of P is the
+    // model ratio P / 2.
+    expect(tiers[0].input).toBe(
+      formatPrice(
+        { ...model, model_ratio: 0.75, quota_type: 0 },
+        'input',
+        'M',
+        false,
+        1,
+        1,
+        undefined
+      )
     )
+    expect(tiers[1].input).toBe(
+      formatPrice(
+        { ...model, model_ratio: 1.75, quota_type: 0 },
+        'input',
+        'M',
+        false,
+        1,
+        1,
+        undefined
+      )
+    )
+  })
 
-    await user.hover(screen.getByText('🔰 · 2 tiers'))
+  test('two channels at the same price are one tier', () => {
+    const model = makeModel({ channel_prices: [1.5, 1.5] })
 
-    expect(await screen.findByText('Channel prices')).toBeInTheDocument()
-    expect(screen.getAllByRole('listitem')).toHaveLength(1)
+    expect(getPriceTiers(model, { tokenUnit: 'M' }).tiers).toEqual([])
+  })
+
+  test('groups win over channels when a model is sold to several groups', () => {
+    const model = makeModel({
+      enable_groups: ['a', 'b'],
+      group_ratio: { a: 1, b: 2 },
+      channel_prices: [1.5, 3.5],
+    })
+
+    expect(getPriceTiers(model, { tokenUnit: 'M' }).source).toBe('group')
   })
 })
 
-// The tooltip is only useful if it agrees with the price it sits next to. A
-// channel price is stored per 1M tokens, exactly like the model price, so both
-// go through the same conversion; these pin that they cannot drift apart.
-describe('formatChannelPrices', () => {
-  test('a channel price equal to the model price formats identically to it', () => {
-    // A ratio of 1 is 2 USD per 1M tokens.
-    const model = makeModel({ model_ratio: 1, channel_prices: [2] })
+describe('ModelTierBadge', () => {
+  function renderBadge(model: PricingModel) {
+    return render(
+      <ModelTierBadge
+        model={model}
+        tiers={getPriceTiers(model, { tokenUnit: 'M' })}
+        priceUnitLabel='1M'
+      />
+    )
+  }
 
-    expect(formatChannelPrices(model, 'M')).toEqual([
-      formatPrice(model, 'input', 'M'),
-    ])
+  test('given one price, no badge is rendered', () => {
+    const { container } = renderBadge(makeModel())
+
+    expect(container).toBeEmptyDOMElement()
   })
 
-  test('a channel price is quoted per 1M tokens, so half of it is that ratio', () => {
-    const model = makeModel({ model_ratio: 1, channel_prices: [4] })
+  test('given several group tiers, the badge says the price starts there', () => {
+    renderBadge(THREE_GROUPS)
 
-    expect(formatChannelPrices(model, 'M')).toEqual([
-      formatPrice({ ...model, model_ratio: 2 }, 'input', 'M'),
-    ])
+    expect(screen.getByText('起 · 3 档')).toBeInTheDocument()
   })
 
-  test('the selected group ratio reaches the tooltip prices', () => {
+  test('given a single tier, no badge is rendered', () => {
     const model = makeModel({
-      model_ratio: 1,
-      channel_prices: [2],
-      enable_groups: ['default', 'vip'],
-      group_ratio: { default: 1, vip: 3 },
+      enable_groups: ['a', 'b'],
+      group_ratio: { a: 2, b: 2 },
     })
+    const { container } = renderBadge(model)
 
-    const [forDefault] = formatChannelPrices(model, 'M', false, 1, 1, 'default')
-    const [forVip] = formatChannelPrices(model, 'M', false, 1, 1, 'vip')
-
-    expect(forVip).not.toEqual(forDefault)
-    expect(forVip).toEqual(
-      formatPrice({ ...model, model_ratio: 1 }, 'input', 'M', false, 1, 1, 'vip')
-    )
+    expect(container).toBeEmptyDOMElement()
   })
 
-  test('no configured channel price yields no prices', () => {
-    expect(formatChannelPrices(makeModel(), 'M')).toEqual([])
-    expect(formatChannelPrices(makeModel({ channel_prices: [] }), 'M')).toEqual(
-      []
-    )
+  test('hovering lists every tier with its input and output price', async () => {
+    const user = userEvent.setup()
+    renderBadge(THREE_GROUPS)
+
+    await user.hover(screen.getByText('起 · 3 档'))
+
+    expect(
+      await screen.findByText(
+        'Input / output price per 1M tokens for each group'
+      )
+    ).toBeInTheDocument()
+    const rows = screen.getAllByRole('listitem')
+    expect(rows).toHaveLength(3)
+    expect(rows.map((row) => row.firstElementChild?.textContent)).toEqual([
+      'free',
+      'default',
+      'vip',
+    ])
+    for (const row of rows) {
+      expect(row.textContent).toContain('Input ')
+      expect(row.textContent).toContain('Output ')
+    }
+  })
+
+  test('the panel names the channel dimension when that is what the tiers are', async () => {
+    const user = userEvent.setup()
+    renderBadge(makeModel({ channel_prices: [1.5, 3.5] }))
+
+    await user.hover(screen.getByText('起 · 2 档'))
+
+    expect(
+      await screen.findByText(
+        'Input / output price per 1M tokens for each channel'
+      )
+    ).toBeInTheDocument()
+  })
+
+  test('the panel is titled with the model it describes', async () => {
+    const user = userEvent.setup()
+    renderBadge(THREE_GROUPS)
+
+    await user.hover(screen.getByText('起 · 3 档'))
+
+    expect(await screen.findByText('ds-v4.1-flash')).toBeInTheDocument()
+  })
+
+  test('the panel states the billing rule', async () => {
+    const user = userEvent.setup()
+    renderBadge(THREE_GROUPS)
+
+    await user.hover(screen.getByText('起 · 3 档'))
+
+    expect(
+      await screen.findByText(/cheapest tier that has this model/)
+    ).toBeInTheDocument()
   })
 })
