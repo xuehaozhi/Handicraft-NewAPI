@@ -483,6 +483,8 @@ docker volume ls | grep handicraft
 | Redis 内存写满报错 | 达到 `REDIS_MAXMEMORY`（默认 64 MB） | 先确认机器还有空闲内存，再调高该值 |
 | `docker compose ps` 里没有 postgres | **正常**，默认用 SQLite | 见 4.4 节 |
 | 反代后 502 Bad Gateway | Nginx 连不到容器 | `curl -I http://127.0.0.1:3000/api/status`；通了就是 Nginx 配置问题，不通看容器日志 |
+| 经过 Cloudflare 后返回 **524** | Cloudflare 的**首字节** 100 秒上限（非企业版），不是 Nginx 超时 | 见 11.2 节最后一段；流式输出通常不受影响 |
+| 所有用户的 IP 显示成同一个 | 没配 `CF-Connecting-IP` | 用 `deploy/nginx-cloudflare.conf`，它带 real_ip 配置（见 11.2） |
 | 反代后**流式输出不出字**，最后一次性蹦出来 | Nginx 缓冲了上游响应 | 确认配置里有 `proxy_buffering off`（见 11.1） |
 | 长回答跑到一半被截断 | `proxy_read_timeout` 太短 | 设成 `3600s`（见 11.1） |
 | 反代后**能打开但一操作就掉登录** | 没设 `SESSION_COOKIE_SECURE` / `SESSION_COOKIE_TRUSTED_URL` | 见 11.1，设完要 `docker compose up -d` 而不是 `restart` |
@@ -615,6 +617,66 @@ sudo ufw delete allow 3000/tcp
 
 改完之后唯一的入口就是 Nginx。**顺序不要反**——先确认 `https://你的域名` 能正常打开，
 再去关 3000，否则会把自己锁在外面。
+
+### 11.2 用 Cloudflare 代理（可选，但省事）
+
+域名挂在 Cloudflare 后面（橙色云朵）时，用 `deploy/nginx-cloudflare.conf` 替换 11.1 的配置，
+**不需要 certbot，也不需要续期**。
+
+先把话说清楚：Cloudflare 自动配的是**访客到 Cloudflare 边缘**那一段的证书。Cloudflare 到你源站
+之间还有一段，这一段也得有证书——但可以在 Cloudflare 后台一键签发，15 年有效，不用续期。
+
+**① 签源站证书**
+
+Cloudflare 后台 → **SSL/TLS → Origin Server → Create Certificate**，主机名保持
+`api.20080831.xyz`，有效期选 15 年，创建。把两段 PEM 分别存到：
+
+```bash
+mkdir -p /etc/nginx/certs
+# 存成 /etc/nginx/certs/api.20080831.xyz.pem  ← Origin Certificate
+# 存成 /etc/nginx/certs/api.20080831.xyz.key  ← Private Key
+chmod 600 /etc/nginx/certs/api.20080831.xyz.key
+```
+
+**② 加密模式必须选 Full (strict)**
+
+Cloudflare 后台 → **SSL/TLS → Overview** → 选 **Full (strict)**。
+
+> ⚠️ **千万不要选 Flexible。** 那个模式下 Cloudflare 到源站走的是明文 HTTP，
+> 你的每一个 API Key 都会以明文经过公网。这个选项在后台看起来"能用"，但等于没有加密。
+
+**③ 装配置并启动**
+
+```bash
+# Alpine
+cp deploy/nginx-cloudflare.conf /etc/nginx/http.d/api.20080831.xyz.conf
+nginx -t && rc-service nginx start && rc-update add nginx default
+
+# Debian/Ubuntu
+cp deploy/nginx-cloudflare.conf /etc/nginx/sites-available/api.20080831.xyz
+ln -s /etc/nginx/sites-available/api.20080831.xyz /etc/nginx/sites-enabled/
+nginx -t && systemctl reload nginx
+```
+
+这个配置和 11.1 的差别，每一条都有原因：
+
+| 差异 | 原因 |
+| --- | --- |
+| 用 Cloudflare 源站证书，不走 Let's Encrypt | 15 年有效、不用续期，省掉 certbot 和它的定时任务 |
+| 加了 `real_ip_header CF-Connecting-IP` | **不加的话所有用户都变成同一个 IP**（Cloudflare 的），按 IP 限流就失效了 |
+| 没有 80 端口的跳转 server 块 | Full (strict) 下 Cloudflare 只用 HTTPS 连源站，80 没东西可服务 |
+
+**④ Cloudflare 后台还要检查三处**
+
+- **Caching → Cache Rules**：给 `api.20080831.xyz/*` 加一条 **Bypass cache**。API 自己会设缓存头，`/api/status` 被缓存会拿到过期数据。
+- **Speed → Optimization**：关掉 **Rocket Loader**、**Auto Minify**、**Email Obfuscation**。它们会改写 HTML 和 JS —— 管理后台是从同一个域名提供的，会被波及。
+- **Network**：**WebSockets 必须开着**（realtime 端点要用）。免费版默认就是开的。
+
+**⑤ 一个绕不过去的限制**
+
+Cloudflare 对**首字节时间**有 100 秒上限（非企业版），超时返回 **524**。这是 Cloudflare 到源站的
+限制，Nginx 里那些 `proxy_read_timeout 3600s` 管不到它。流式输出因为很早就开始吐字，通常没问题；
+但如果某个模型「思考」超过 100 秒才吐第一个 token，就会撞上。遇到 524 就是这个原因，不是配置错。
 
 ---
 
