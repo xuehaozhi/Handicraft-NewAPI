@@ -14,12 +14,38 @@
 | 项目 | 最低 | 建议 | 检查命令 |
 | --- | --- | --- | --- |
 | Docker | 20.10+ | — | `docker --version` |
+| **Docker 引擎在运行** | — | — | `docker info` |
 | Docker Compose | v2 | — | `docker compose version` |
-| 内存 | 512 MB（**必须配 swap**，见 1.2） | 1 GB | `free -h` |
+| 内存 | 512 MB（**必须配 swap**，见 1.3） | 1 GB | `free -h` |
 | 磁盘 | 3 GB 可用 | 10 GB | `df -h /` |
 | 网络 | 能访问 `ghcr.io` | — | — |
 
-### 1.1 内存预算（512 MB 机器）
+### 1.1 先确认 Docker 引擎真的在跑
+
+**`docker --version` 有输出，不代表引擎在运行。** `docker compose` 甚至能在守护进程没起来的情况下
+解析 compose 文件并打印警告，直到要拉镜像时才失败：
+
+```
+Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?
+```
+
+所以第一步用 `docker info` 确认——它必须能打印出 `Server:` 段：
+
+```bash
+docker info
+```
+
+按 `systemctl status docker --no-pager` 的结果分三种情况：
+
+| 显示 | 含义 | 处理 |
+| --- | --- | --- |
+| `could not be found` | 引擎没装上（可能只装了客户端，或安装脚本中途失败） | `which dockerd` 确认为空后重装：`curl -fsSL https://get.docker.com \| sudo sh` |
+| `inactive (dead)` | 装好了但没启动，最常见 | `sudo systemctl start docker && sudo systemctl enable docker` |
+| `failed` | 启动失败 | `sudo journalctl -u docker -n 50 --no-pager` 看原因 |
+
+`enable` 那步别省——否则机器一重启服务就没了。
+
+### 1.2 内存预算（512 MB 机器）
 
 默认配置已针对小内存主机调整——**数据库用 SQLite 而非 PostgreSQL**，Redis 内存上限也降到 64 MB：
 
@@ -35,7 +61,7 @@
 > PostgreSQL 保留在 `docker-compose.yml` 中但被 `profiles` 门控，默认不启动。
 > 内存 ≥2 GB 的机器可以启用，见 4.4 节。
 
-### 1.2 配置 swap（512 MB 机器必做）
+### 1.3 配置 swap（512 MB 机器必做）
 
 512 MB 内存的机器**不配 swap 会随机被 OOM 杀掉进程**。2 GB swap 文件能显著提升稳定性：
 
@@ -60,7 +86,7 @@ echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf
 
 验证：`free -h` 的 Swap 行应显示 2.0Gi。
 
-### 1.3 关于从源码构建
+### 1.4 关于从源码构建
 
 仅当你选择本地构建（见 4.2 节）时才需要 ≥2 GB 内存和 10–20 分钟编译时间。
 默认流程（拉取云端镜像）用不到，512 MB 机器请**不要**尝试本地构建。
@@ -448,7 +474,7 @@ docker volume ls | grep handicraft
 | `the attribute 'version' is obsolete` | Compose v2 的无害警告 | 已在本仓库的 compose 文件里移除该属性；如果你改过文件，删掉 `version:` 那一行即可 |
 | new-api 容器反复重启 | Redis 未就绪或密码不匹配 | `docker compose logs redis`，核对 `.env` 密码 |
 | 日志出现 `Redis ping test failed` | Redis 密码与 `REDIS_CONN_STRING` 不一致 | 两处都取自 `${REDIS_PASSWORD}`，确认 `.env` 已生效 |
-| 容器被 Killed（退出码 137） | **内存不足被 OOM Killer 杀掉** | 按 1.2 节配置 swap；或改用更小内存占用 |
+| 容器被 Killed（退出码 137） | **内存不足被 OOM Killer 杀掉** | 按 1.3 节配置 swap；或改用更小内存占用 |
 | `docker compose pull` 失败 | 镜像尚未构建完成，或包被设为私有 | 去仓库 Actions 页确认构建成功 |
 | 所有 API 返回 503 `no available channel` | 未添加上游渠道 | 后台「渠道」中添加 |
 | Redis 内存写满报错 | 达到 `REDIS_MAXMEMORY`（默认 64 MB） | 先确认机器还有空闲内存，再调高该值 |
@@ -468,7 +494,7 @@ docker inspect new-api --format '{{.State.ExitCode}} {{.State.OOMKilled}}'
 dmesg | grep -i 'killed process' | tail -5
 ```
 
-处理顺序：先确认 swap 已启用（1.2 节），再考虑降低 `REDIS_MAXMEMORY`、
+处理顺序：先确认 swap 已启用（1.3 节），再考虑降低 `REDIS_MAXMEMORY`、
 限制 `RELAY_TIMEOUT` 并发，最后才是升级内存。
 
 ### 关于 SQLite 的并发写入
