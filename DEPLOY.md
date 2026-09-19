@@ -11,6 +11,9 @@
 
 镜像由 GitHub Actions **在云端构建**并推送到 GHCR，服务器**只负责拉取，不需要编译**。
 
+> **Alpine Linux 用户先看文末的《附录：Alpine Linux》。** Alpine 用 OpenRC 而不是 systemd，
+> 本文中的 `systemctl`、`journalctl`、`sudo`、`ufw`、`openssl` 全部需要替换。
+
 | 项目 | 最低 | 建议 | 检查命令 |
 | --- | --- | --- | --- |
 | Docker | 20.10+ | — | `docker --version` |
@@ -612,6 +615,128 @@ sudo ufw delete allow 3000/tcp
 
 改完之后唯一的入口就是 Nginx。**顺序不要反**——先确认 `https://你的域名` 能正常打开，
 再去关 3000，否则会把自己锁在外面。
+
+---
+
+## 附录：Alpine Linux
+
+本文其余部分按 Debian/Ubuntu 写。Alpine 用 **OpenRC 而不是 systemd**，所以 `systemctl`、
+`journalctl`、`sudo`、`ufw`、`openssl`、`git` **默认全都不存在**，需要逐条替换。
+
+### A.1 装并启动 Docker
+
+`docker` 与 `docker-cli-compose` 都在 community 仓库，先确认 `/etc/apk/repositories` 里有它：
+
+```bash
+apk update
+apk add docker docker-cli-compose
+
+rc-update add docker boot      # 对应 systemctl enable
+rc-service docker start        # 对应 systemctl start
+
+docker info                    # 必须能打印出 Server: 段
+docker compose version
+```
+
+`docker-cli-compose` 别漏——少了它只有 `docker` 命令，没有 `docker compose` 子命令。
+（`docker-compose` 那个包是已废弃的 Python v1，不要用。）
+
+启动失败时：
+
+```bash
+rc-service docker status
+rc-service cgroups status      # 依赖服务
+tail -50 /var/log/messages     # Alpine 看日志用这个，不是 journalctl
+```
+
+### A.2 命令对照
+
+| 本文档里写的 | Alpine 上应该是 |
+| --- | --- |
+| `sudo systemctl start docker` | `rc-service docker start` |
+| `sudo systemctl enable docker` | `rc-update add docker boot` |
+| `sudo systemctl status docker` | `rc-service docker status` |
+| `sudo systemctl reload nginx` | `rc-service nginx reload` |
+| `sudo journalctl -u docker -n 50` | `tail -50 /var/log/messages` |
+| `sudo apt install -y git` | `apk add git` |
+| `sudo ufw allow 80/tcp` | 无 ufw；用 `awall`、iptables，或云厂商安全组 |
+| `sudo <命令>` | 默认无 sudo：直接用 root，或 `apk add sudo` |
+
+`apk add` 你实际会用到的一次装齐：
+
+```bash
+apk add git curl nginx certbot certbot-nginx
+```
+
+### A.3 生成 Redis 密码
+
+Alpine 默认没有 `openssl`。这条是纯 busybox 的等价写法，输出同样 64 位十六进制：
+
+```bash
+head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'; echo
+```
+
+仍然**不能用 base64**——`/` 会截断 `redis://:密码@redis:6379` 的 userinfo。
+
+### A.4 swap 必须用 dd，不能 fallocate
+
+Alpine 上 `fallocate` 建出的文件带空洞，`swapon` 会拒绝：
+
+```
+swapon: /swapfile: file has holes
+```
+
+而且它**不会**让 swap 生效（`free -h` 的 Swap 仍是 0B）。必须先删掉重来，用 `dd` 写真实数据块：
+
+```bash
+swapoff /swapfile 2>/dev/null
+rm -f /swapfile
+dd if=/dev/zero of=/swapfile bs=1M count=2048
+chmod 600 /swapfile
+mkswap /swapfile
+swapon /swapfile
+swapon --show && free -h      # Swap 行应显示 2.0Gi
+```
+
+### A.5 Nginx 的目录结构不同
+
+| Debian/Ubuntu | Alpine |
+| --- | --- |
+| `/etc/nginx/sites-available/` | `/etc/nginx/http.d/` |
+| `/etc/nginx/sites-enabled/` + 软链 | 不需要软链，放进 `http.d/` 即生效 |
+
+所以 11.1 节第三步要改成：
+
+```bash
+curl -fsSL -o /etc/nginx/http.d/api.example.com.conf \
+  https://raw.githubusercontent.com/xuehaozhi/Handicraft-NewAPI/custom/rc33/deploy/nginx-api.conf
+
+nginx -t && rc-service nginx start
+rc-update add nginx default
+```
+
+> `nginx` 装完**不会自动启动**。没起过就 `rc-service nginx reload` 会报
+> `cannot 'reload' as it has not been started`，先 `start` 再 `reload`。
+
+### A.6 crond 默认没运行
+
+certbot 的自动续期靠定时任务，而 Alpine 的 `crond` 默认不起：
+
+```bash
+rc-update add crond default
+rc-service crond start
+```
+
+### A.7 Alpine 更省内存
+
+| 组件 | Alpine | Debian/Ubuntu |
+| --- | --- | --- |
+| 系统 + Docker | 20–50 MB | 70–100 MB |
+| new-api 应用 | 200–300 MB | 200–300 MB |
+| Redis | 20–50 MB | 20–50 MB |
+| **合计** | **约 250–400 MB** | 约 300–450 MB |
+
+512 MB 的机器上 Alpine 的余量明显更宽，swap 的紧迫性也低一些——但仍然建议配。
 
 ---
 
